@@ -12,13 +12,13 @@ module.exports = {
     adminAuth: {
         type: "credentials",
         users: [{
-            username: "admin",
-            password: "$2b$08$z7lqgYpCzG1p4k6Yx4QY3uW3mZ1k5Y3Q8G2yH7L3QFZkP5rV6p1yG",
+            username: __ADMIN_USER__,
+            password: __ADMIN_HASH__,
             permissions: "*"
         }]
     },
 
-    credentialSecret: process.env.NODE_RED_CREDENTIAL_SECRET || "supersecretkey",
+    credentialSecret: __CREDENTIAL_SECRET__,
 
     httpNodeCors: {
         origin: "*",
