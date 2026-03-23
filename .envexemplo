@@ -3,14 +3,19 @@ POSTGRES_USER=evolution
 POSTGRES_PASSWORD=evolution
 
 # Preencha estas 2 chaves externas antes de subir a stack
-EVOLUTION_API_KEY=ClzK8ulmRgyvEdcxRxthaITWpXGcIM6O8
-MISTRAL_API_KEY=MISTRAL_API_KEY=TE60GhQgCSitavnUAqGZnsKbghVyhOZU
+EVOLUTION_API_KEY=troque-por-uma-chave-forte-da-evolution
+MISTRAL_API_KEY=troque-por-uma-chave-forte-da-mistral
 
 # Credenciais de administração do Node-RED
 NODE_RED_ADMIN_USER=admin
-NODE_RED_ADMIN_PASSWORD=B8&jFAeUnYLXE7lCUvzoJTT7jlQhpPBy
+NODE_RED_ADMIN_PASSWORD=troque-por-uma-senha-unica-e-forte
 
-# Segredos internos já gerados
-WEBHOOK_SECRET=B8&jFAeUnYLXE7lCUvzoJTT7jlQhpPBy
-NODE_RED_CREDENTIAL_SECRET=zQ&34Nf&7Se5mDtFHLLFJoDjjqYEMY0qUmJzi75ULikkoV6l
-NODE_RED_COOKIE_SECRET=L4O27lRrOyh^Dzxf9CMrcqZc01e-pEY-#V35pOdlioGhZx#h
+# Segredos internos
+WEBHOOK_SECRET=troque-por-um-token-legado-forte
+WEBHOOK_SECRET_PREVIOUS=
+WEBHOOK_HMAC_SECRET=troque-por-um-segredo-hmac-forte
+WEBHOOK_HMAC_SECRET_PREVIOUS=
+WEBHOOK_SIGNATURE_MAX_AGE_MS=300000
+NODE_RED_CREDENTIAL_SECRET=troque-por-um-segredo-de-credenciais
+NODE_RED_COOKIE_SECRET=troque-por-um-segredo-de-cookie
+NODE_RED_ALLOWED_ORIGINS=http://localhost:1880,http://127.0.0.1:1880
