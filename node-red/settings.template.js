@@ -3,6 +3,10 @@ const crypto = require('crypto');
 const webhookHmacSecrets = [__WEBHOOK_HMAC_SECRET__, __WEBHOOK_HMAC_SECRET_PREVIOUS__].filter(Boolean);
 const webhookSignatureMaxAgeMs = __WEBHOOK_SIGNATURE_MAX_AGE_MS__;
 const allowedNodeOrigins = __NODE_RED_ALLOWED_ORIGINS__;
+const loginRateLimitWindowMs = __LOGIN_RATE_LIMIT_WINDOW_MS__;
+const loginRateLimitMaxAttempts = __LOGIN_RATE_LIMIT_MAX_ATTEMPTS__;
+const loginRateLimitBlockMs = __LOGIN_RATE_LIMIT_BLOCK_MS__;
+const loginRateLimitStore = new Map();
 
 function canonicalize(value) {
     if (value === null || typeof value !== 'object') {
@@ -61,6 +65,71 @@ function hasValidWebhookSignature(req) {
     });
 }
 
+
+function getClientIp(req) {
+    const forwardedFor = req.headers['x-forwarded-for'];
+    if (typeof forwardedFor === 'string' && forwardedFor.trim()) {
+        return forwardedFor.split(',')[0].trim();
+    }
+
+    return String(req.ip || req.connection?.remoteAddress || 'unknown');
+}
+
+function cleanupLoginRateLimitStore(now) {
+    for (const [key, entry] of loginRateLimitStore.entries()) {
+        const idleForMs = now - Math.max(entry.lastAttemptAt || 0, entry.blockedUntil || 0);
+        if (idleForMs > Math.max(loginRateLimitWindowMs, loginRateLimitBlockMs)) {
+            loginRateLimitStore.delete(key);
+        }
+    }
+}
+
+function loginRateLimitMiddleware(req, res, next) {
+    if (req.method !== 'POST' || req.path !== '/auth/token') {
+        next();
+        return;
+    }
+
+    const now = Date.now();
+    cleanupLoginRateLimitStore(now);
+
+    const username = String(req.body?.username || '').trim().toLowerCase() || 'unknown';
+    const rateKey = `${getClientIp(req)}:${username}`;
+    const current = loginRateLimitStore.get(rateKey);
+
+    if (current && current.blockedUntil > now) {
+        const retryAfterSeconds = Math.max(1, Math.ceil((current.blockedUntil - now) / 1000));
+        res.setHeader('Retry-After', String(retryAfterSeconds));
+        res.status(429).json({ ok: false, error: 'too_many_login_attempts', retry_after_seconds: retryAfterSeconds });
+        return;
+    }
+
+    res.on('finish', () => {
+        const finishedAt = Date.now();
+        cleanupLoginRateLimitStore(finishedAt);
+
+        if (res.statusCode < 400) {
+            loginRateLimitStore.delete(rateKey);
+            return;
+        }
+
+        const stored = loginRateLimitStore.get(rateKey);
+        const entry = !stored || (finishedAt - stored.windowStartedAt) >= loginRateLimitWindowMs
+            ? { count: 0, windowStartedAt: finishedAt, blockedUntil: 0 }
+            : stored;
+
+        entry.count += 1;
+        entry.lastAttemptAt = finishedAt;
+        if (entry.count >= loginRateLimitMaxAttempts) {
+            entry.blockedUntil = finishedAt + loginRateLimitBlockMs;
+        }
+
+        loginRateLimitStore.set(rateKey, entry);
+    });
+
+    next();
+}
+
 module.exports = {
     flowFile: 'flows.json',
 
@@ -82,6 +151,8 @@ module.exports = {
     },
 
     credentialSecret: __CREDENTIAL_SECRET__,
+
+    httpAdminMiddleware: [loginRateLimitMiddleware],
 
     httpNodeCors: {
         origin: allowedNodeOrigins,

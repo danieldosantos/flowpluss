@@ -7,6 +7,7 @@ Stack local para automação WhatsApp com Evolution API, Node-RED, Redis e Postg
 A revisão desta versão removeu a confiança direta do Node-RED em um token de query string e introduziu uma camada formal de autenticação entre serviços:
 
 - **Node-RED admin** continua exigindo autenticação por credenciais, com senha armazenada em hash bcrypt.
+- **Login do editor do Node-RED** agora também tem rate limit próprio por IP + usuário no endpoint `/auth/token`, com janela, contador de tentativas e bloqueio temporário configuráveis.
 - **Evolution API** continua protegida por `AUTHENTICATION_API_KEY`.
 - **Webhook Evolution -> Node-RED** agora passa por um **gateway interno**:
   - a Evolution entrega o evento no `webhook-gateway` com o token legado da URL;
@@ -21,11 +22,13 @@ A revisão desta versão removeu a confiança direta do Node-RED em um token de 
 - adiciona autenticação máquina-a-máquina com proteção contra replay;
 - permite rotação controlada de segredo (`*_PREVIOUS`);
 - limita CORS do `httpNode` para origens explícitas;
+- adiciona mitigação de brute force no login do editor do Node-RED;
 - endurece o cookie do admin com `httpOnly` e `sameSite=strict`.
 
 ## Limitações que continuam válidas
 
 - esta stack ainda é pensada para **ambiente local / rede confiável**, porque Node-RED e Evolution seguem publicados apenas em `127.0.0.1`;
+- se o editor do Node-RED for exposto por proxy reverso, túnel, VPN com publicação externa, `portproxy` ou bind fora de loopback, haverá risco de brute force e enumeração de credenciais, então o rate limit de login passa a ser obrigatório como defesa adicional, não substituta de isolamento de rede;
 - não foi adicionado login federado, OAuth, refresh token ou JWT de usuário final, porque o sistema atual é predominantemente **server-to-server/local**;
 - o token legado na URL continua existindo **somente** na borda Evolution -> gateway, por limitação prática do modo de integração atual. A autenticação efetiva do Node-RED agora é por assinatura HMAC.
 
@@ -39,6 +42,22 @@ Copie `.envexemplo` para `.env` e preencha especialmente:
 - `WEBHOOK_HMAC_SECRET_PREVIOUS` (opcional, durante rotação)
 - `WEBHOOK_SIGNATURE_MAX_AGE_MS`
 - `NODE_RED_ALLOWED_ORIGINS`
+- `NODE_RED_LOGIN_RATE_LIMIT_WINDOW_MS`
+- `NODE_RED_LOGIN_RATE_LIMIT_MAX_ATTEMPTS`
+- `NODE_RED_LOGIN_RATE_LIMIT_BLOCK_MS`
+
+
+## Rate limit de login do Node-RED
+
+O repositório já tinha **anti-flood de mensagens** e **controle de fila da IA**, mas esses mecanismos não protegiam autenticação.
+
+Agora o endpoint de login do editor (`POST /auth/token`) recebe um rate limit dedicado com estas regras padrão:
+
+- **janela**: `15` minutos (`NODE_RED_LOGIN_RATE_LIMIT_WINDOW_MS=900000`);
+- **máximo de tentativas por IP + usuário**: `5` (`NODE_RED_LOGIN_RATE_LIMIT_MAX_ATTEMPTS=5`);
+- **bloqueio temporário**: `30` minutos (`NODE_RED_LOGIN_RATE_LIMIT_BLOCK_MS=1800000`).
+
+Quando o limite é atingido, o Node-RED responde `429 Too Many Requests` com `Retry-After`. Isso reduz a suscetibilidade do editor a brute force caso o ambiente seja exposto além do loopback.
 
 ## Subida
 
