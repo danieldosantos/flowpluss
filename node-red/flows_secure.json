@@ -1,0 +1,298 @@
+[
+  {
+    "id": "secure_tab",
+    "type": "tab",
+    "label": "WhatsApp Secure PRO",
+    "disabled": false,
+    "info": ""
+  },
+  {
+    "id": "in_webhook",
+    "type": "http in",
+    "z": "secure_tab",
+    "name": "Webhook Evolution Seguro",
+    "url": "/evolution/webhook",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 160,
+    "y": 160,
+    "wires": [
+      [
+        "fn_guard"
+      ]
+    ]
+  },
+  {
+    "id": "fn_guard",
+    "type": "function",
+    "z": "secure_tab",
+    "name": "Validação + segurança + memória",
+    "func": "const queryToken = msg.req?.query?.token || '';\nconst secret = env.get('WEBHOOK_SECRET') || '';\nif (!secret || queryToken !== secret) {\n  msg.statusCode = 403;\n  msg.payload = { ok: false, error: 'forbidden' };\n  return [null, msg, null];\n}\n\nconst body = msg.payload || {};\nconst data = body.data || {};\nconst key = data.key || {};\nconst event = String(body.event || '').toLowerCase();\n\nfunction onlyDigits(v) { return String(v || '').replace(/\\D/g, ''); }\nfunction isGroupOrStatus(jid) {\n  jid = String(jid || '');\n  return jid.endsWith('@g.us') || jid === 'status@broadcast' || jid.includes('@newsletter');\n}\nfunction isRealWhatsappJid(jid) {\n  jid = String(jid || '');\n  return jid.endsWith('@s.whatsapp.net') || jid.endsWith('@c.us');\n}\nfunction looksLikeLid(jid) { return String(jid || '').includes('@lid'); }\n\nif (event !== 'messages.upsert') {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'evento_ignorado', event: body.event || null };\n  return [null, msg, null];\n}\n\nif (key.fromMe === true) {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'fromMe' };\n  return [null, msg, null];\n}\n\nconst candidates = [\n  key.remoteJidAlt,\n  body.senderPn,\n  data.senderPn,\n  body.sender,\n  data.sender,\n  key.participant,\n  data.participant,\n  key.remoteJid\n].filter(Boolean);\n\nlet chosen = candidates.find(j => isRealWhatsappJid(j) && !isGroupOrStatus(j));\nif (!chosen) chosen = candidates.find(j => !looksLikeLid(j) && !isGroupOrStatus(j));\nif (!chosen) chosen = candidates[0] || '';\n\nconst instance = body.instance || body.instanceName || data.instance || data.instanceName || 'danielteste';\nconst pushName = body.pushName || data.pushName || 'Cliente';\n\nif (!chosen || looksLikeLid(chosen) || isGroupOrStatus(chosen)) {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'lid_sem_numero_real', instance };\n  return [null, msg, null];\n}\n\nconst number = onlyDigits(chosen);\nif (!number) {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'numero_invalido', instance };\n  return [null, msg, null];\n}\n\nlet receivedText = '';\nif (data.message) {\n  receivedText = data.message.conversation\n    || data.message.extendedTextMessage?.text\n    || data.message.imageMessage?.caption\n    || data.message.videoMessage?.caption\n    || data.message.documentMessage?.caption\n    || '';\n}\nreceivedText = String(receivedText || '').trim();\nif (!receivedText) {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'mensagem_sem_texto', instance, number };\n  return [null, msg, null];\n}\n\nconst dedupeWindowMs = 15000;\nconst now = Date.now();\nconst dedupeStore = flow.get('dedupeStore') || {};\nconst messageId = key.id || data.id || body.id || '';\nconst dedupeKey = messageId\n  ? `${instance}:${number}:msgid:${messageId}`\n  : `${instance}:${number}:text:${receivedText.toLowerCase()}`;\n\nfor (const k in dedupeStore) {\n  if (now - dedupeStore[k] > dedupeWindowMs) delete dedupeStore[k];\n}\nif (dedupeStore[dedupeKey] && (now - dedupeStore[dedupeKey] < dedupeWindowMs)) {\n  flow.set('dedupeStore', dedupeStore);\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'mensagem_duplicada', instance, number };\n  return [null, msg, null];\n}\ndedupeStore[dedupeKey] = now;\nflow.set('dedupeStore', dedupeStore);\n\nconst floodWindowMs = 5000;\nconst floodStore = flow.get('floodStore') || {};\nconst floodKey = `${instance}:${number}`;\nif (floodStore[floodKey] && (now - floodStore[floodKey] < floodWindowMs)) {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'flood_bloqueado', instance, number };\n  return [null, msg, null];\n}\nfloodStore[floodKey] = now;\nflow.set('floodStore', floodStore);\n\nconst memoryKey = `memory:${instance}:${number}`;\nlet history = flow.get(memoryKey) || [];\nhistory = Array.isArray(history) ? history.slice(-10) : [];\n\nmsg._meta = {\n  event, instance, pushName, number, receivedText, dedupeKey, memoryKey\n};\nmsg._history = history;\nreturn [msg, null, msg];",
+    "outputs": 3,
+    "x": 470,
+    "y": 160,
+    "wires": [
+      [
+        "delay_queue"
+      ],
+      [
+        "debug_ignored",
+        "resp_ignored"
+      ],
+      [
+        "debug_prepare"
+      ]
+    ]
+  },
+  {
+    "id": "delay_queue",
+    "type": "delay",
+    "z": "secure_tab",
+    "name": "Fila IA 1 req / 3s",
+    "pauseType": "rate",
+    "timeout": "3",
+    "timeoutUnits": "seconds",
+    "rate": "1",
+    "nbRateUnits": "3",
+    "rateUnits": "second",
+    "randomFirst": "1",
+    "randomLast": "2",
+    "randomUnits": "seconds",
+    "drop": false,
+    "allowrate": false,
+    "outputs": 1,
+    "x": 730,
+    "y": 160,
+    "wires": [
+      [
+        "fn_mistral_req"
+      ]
+    ]
+  },
+  {
+    "id": "fn_mistral_req",
+    "type": "function",
+    "z": "secure_tab",
+    "name": "Montar request Mistral",
+    "func": "const history = msg._history || [];\nconst messages = [\n  {\n    role: 'system',\n    content: 'Você é um atendente profissional no WhatsApp. Responda em português do Brasil, seja claro, educado e objetivo, não invente informações, se faltar contexto peça mais detalhes, não diga que é IA a menos que perguntem e mantenha respostas curtas ou médias.'\n  }\n];\nfor (const item of history) {\n  if (item && item.role && item.content) messages.push({ role: item.role, content: item.content });\n}\nmessages.push({\n  role: 'user',\n  content: `Nome do cliente: ${msg._meta.pushName}\\nNúmero: ${msg._meta.number}\\n\\nMensagem atual do cliente:\\n${msg._meta.receivedText}`\n});\n\nmsg.method = 'POST';\nmsg.url = 'https://api.mistral.ai/v1/chat/completions';\nmsg.headers = {\n  'Authorization': 'Bearer ' + env.get('MISTRAL_API_KEY'),\n  'Content-Type': 'application/json'\n};\nmsg.payload = {\n  model: 'mistral-small-latest',\n  messages,\n  max_tokens: 300,\n  temperature: 0.3\n};\nreturn msg;",
+    "outputs": 1,
+    "x": 1010,
+    "y": 160,
+    "wires": [
+      [
+        "http_mistral"
+      ]
+    ]
+  },
+  {
+    "id": "http_mistral",
+    "type": "http request",
+    "z": "secure_tab",
+    "name": "POST Mistral",
+    "method": "use",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": true,
+    "headers": [],
+    "x": 1250,
+    "y": 160,
+    "wires": [
+      [
+        "fn_format_send"
+      ]
+    ]
+  },
+  {
+    "id": "fn_format_send",
+    "type": "function",
+    "z": "secure_tab",
+    "name": "Formatar resposta + persistir memória",
+    "func": "let aiText = '';\nif (typeof msg.payload === 'string') aiText = msg.payload;\nelse if (msg.payload?.choices?.[0]?.message?.content) aiText = msg.payload.choices[0].message.content;\nelse if (msg.payload?.message) aiText = msg.payload.message;\nelse if (msg.payload?.content) aiText = msg.payload.content;\nelse if (msg.payload?.text) aiText = msg.payload.text;\n\nif (Array.isArray(aiText)) {\n  aiText = aiText.map(part => typeof part === 'string' ? part : (part?.text || '')).join(' ');\n}\naiText = String(aiText || '').trim();\nif (!aiText) aiText = 'Recebi sua mensagem. Em breve retorno com mais detalhes.';\n\nconst memoryKey = msg._meta.memoryKey;\nlet history = flow.get(memoryKey) || [];\nhistory = Array.isArray(history) ? history : [];\nhistory.push({ role: 'user', content: msg._meta.receivedText, ts: Date.now() });\nhistory.push({ role: 'assistant', content: aiText, ts: Date.now() });\nhistory = history.slice(-10);\nflow.set(memoryKey, history);\n\nmsg.method = 'POST';\nmsg.url = `http://evolution-api:8080/message/sendText/${encodeURIComponent(msg._meta.instance)}`;\nmsg.headers = {\n  'Content-Type': 'application/json',\n  'apikey': env.get('EVOLUTION_API_KEY')\n};\nmsg.payload = {\n  number: msg._meta.number,\n  text: aiText,\n  delay: 1000,\n  linkPreview: false\n};\nmsg._debug_ai = { number: msg._meta.number, pergunta: msg._meta.receivedText, resposta: aiText };\nreturn msg;",
+    "outputs": 1,
+    "x": 1510,
+    "y": 160,
+    "wires": [
+      [
+        "debug_ai",
+        "http_evo"
+      ]
+    ]
+  },
+  {
+    "id": "http_evo",
+    "type": "http request",
+    "z": "secure_tab",
+    "name": "POST sendText Evolution",
+    "method": "use",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": true,
+    "headers": [],
+    "x": 1770,
+    "y": 160,
+    "wires": [
+      [
+        "debug_evo",
+        "fn_ok"
+      ]
+    ]
+  },
+  {
+    "id": "fn_ok",
+    "type": "function",
+    "z": "secure_tab",
+    "name": "Responder 200",
+    "func": "msg.statusCode = 200; msg.payload = { ok: true, sent: true }; return msg;",
+    "outputs": 1,
+    "x": 1980,
+    "y": 160,
+    "wires": [
+      [
+        "resp_ok"
+      ]
+    ]
+  },
+  {
+    "id": "resp_ok",
+    "type": "http response",
+    "z": "secure_tab",
+    "name": "HTTP 200 enviado",
+    "statusCode": "",
+    "headers": {},
+    "x": 2160,
+    "y": 160,
+    "wires": []
+  },
+  {
+    "id": "catch_mistral",
+    "type": "catch",
+    "z": "secure_tab",
+    "name": "Erro Mistral",
+    "scope": [
+      "http_mistral"
+    ],
+    "uncaught": false,
+    "x": 1260,
+    "y": 280,
+    "wires": [
+      [
+        "debug_error",
+        "fn_fallback"
+      ]
+    ]
+  },
+  {
+    "id": "fn_fallback",
+    "type": "function",
+    "z": "secure_tab",
+    "name": "Fallback humano",
+    "func": "const memoryKey = msg._meta?.memoryKey;\nif (memoryKey) {\n  let history = flow.get(memoryKey) || [];\n  history = Array.isArray(history) ? history : [];\n  history.push({ role: 'user', content: msg._meta?.receivedText || '', ts: Date.now() });\n  history.push({ role: 'assistant', content: 'Recebi sua mensagem 👍 Estou finalizando um atendimento aqui e já te respondo melhor.', ts: Date.now() });\n  history = history.slice(-10);\n  flow.set(memoryKey, history);\n}\nmsg.method = 'POST';\nmsg.url = `http://evolution-api:8080/message/sendText/${encodeURIComponent(msg._meta?.instance || 'danielteste')}`;\nmsg.headers = {\n  'Content-Type': 'application/json',\n  'apikey': env.get('EVOLUTION_API_KEY')\n};\nmsg.payload = {\n  number: msg._meta?.number,\n  text: 'Recebi sua mensagem 👍\\n\\nEstou finalizando um atendimento aqui e já te respondo melhor.',\n  delay: 1000,\n  linkPreview: false\n};\nreturn msg;",
+    "outputs": 1,
+    "x": 1510,
+    "y": 280,
+    "wires": [
+      [
+        "http_evo"
+      ]
+    ]
+  },
+  {
+    "id": "debug_prepare",
+    "type": "debug",
+    "z": "secure_tab",
+    "name": "DEBUG preparo",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": true,
+    "complete": "_meta",
+    "targetType": "msg",
+    "x": 700,
+    "y": 100,
+    "wires": []
+  },
+  {
+    "id": "debug_ignored",
+    "type": "debug",
+    "z": "secure_tab",
+    "name": "DEBUG ignorado",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": true,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 700,
+    "y": 230,
+    "wires": []
+  },
+  {
+    "id": "resp_ignored",
+    "type": "http response",
+    "z": "secure_tab",
+    "name": "HTTP 200 ignorado",
+    "statusCode": "",
+    "headers": {},
+    "x": 940,
+    "y": 230,
+    "wires": []
+  },
+  {
+    "id": "debug_ai",
+    "type": "debug",
+    "z": "secure_tab",
+    "name": "DEBUG IA saída",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": true,
+    "complete": "_debug_ai",
+    "targetType": "msg",
+    "x": 1760,
+    "y": 100,
+    "wires": []
+  },
+  {
+    "id": "debug_evo",
+    "type": "debug",
+    "z": "secure_tab",
+    "name": "DEBUG Evolution",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": true,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 1980,
+    "y": 100,
+    "wires": []
+  },
+  {
+    "id": "debug_error",
+    "type": "debug",
+    "z": "secure_tab",
+    "name": "DEBUG erro IA",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": true,
+    "complete": "error",
+    "targetType": "msg",
+    "x": 1490,
+    "y": 340,
+    "wires": []
+  }
+]

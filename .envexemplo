@@ -1,0 +1,16 @@
+POSTGRES_DB=evolution
+POSTGRES_USER=evolution
+POSTGRES_PASSWORD=evolution
+
+# Preencha estas 2 chaves externas antes de subir a stack
+EVOLUTION_API_KEY=ClzK8ulmRgyvEdcxRxthaITWpXGcIM6O8
+MISTRAL_API_KEY=MISTRAL_API_KEY=TE60GhQgCSitavnUAqGZnsKbghVyhOZU
+
+# Credenciais de administração do Node-RED
+NODE_RED_ADMIN_USER=admin
+NODE_RED_ADMIN_PASSWORD=B8&jFAeUnYLXE7lCUvzoJTT7jlQhpPBy
+
+# Segredos internos já gerados
+WEBHOOK_SECRET=B8&jFAeUnYLXE7lCUvzoJTT7jlQhpPBy
+NODE_RED_CREDENTIAL_SECRET=zQ&34Nf&7Se5mDtFHLLFJoDjjqYEMY0qUmJzi75ULikkoV6l
+NODE_RED_COOKIE_SECRET=L4O27lRrOyh^Dzxf9CMrcqZc01e-pEY-#V35pOdlioGhZx#h
