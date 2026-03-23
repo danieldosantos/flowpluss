@@ -51,3 +51,24 @@ docker compose up -d --build
 
 - Node-RED: http://127.0.0.1:1880
 - Evolution: http://127.0.0.1:8080
+
+## Revisão do bloqueio de acesso externo
+
+O bind em `127.0.0.1` no `docker-compose.yml` reduz a superfície de exposição, mas **não é evidência suficiente sozinho** de que o serviço está inacessível externamente no host final. A validação correta para este projeto é:
+
+1. **Confirmar o cenário operacional real**: este repositório presume **host Windows local**. Se estiver rodando em VPS, VM, WSL com encaminhamento, servidor com proxy reverso, VPN com funnel/exit node ou qualquer publicação externa, o risco muda.
+2. **Confirmar o bind efetivo no host**: as portas publicadas precisam continuar restritas a `127.0.0.1:1880` e `127.0.0.1:8080`.
+3. **Confirmar controles fora do Docker**: verificar se o firewall do Windows foi aplicado e se não há `portproxy`, proxy reverso, túnel, NAT/port-forward do roteador ou publicação externa burlando o bind local.
+4. **Auditar no host final**: a checagem deve ser feita na máquina onde a stack realmente roda, não apenas no ambiente de desenvolvimento.
+
+### Como validar no Windows
+
+1. Suba a stack normalmente.
+2. Rode `firewall_hardening.ps1` como Administrador para garantir as regras de bloqueio remoto.
+3. Rode `audit_external_access.ps1` no **host final** para validar:
+   - listeners em `1880` e `8080`;
+   - presença das regras de firewall;
+   - ausência de `netsh interface portproxy`;
+   - portas publicadas pelos containers Docker.
+
+Se o script acusar bind fora de loopback, ausência de firewall ou `portproxy`, trate isso como **falha de exposição**. Mesmo com tudo verde, ainda é necessário revisar manualmente proxy reverso, VPN/túnel e port-forward do roteador, porque isso depende da topologia real do ambiente.
