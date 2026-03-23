@@ -14,6 +14,7 @@ O que já vem configurado:
 - Memória do bot persistida no Redis
 - Mensagens do WhatsApp persistidas pela Evolution no PostgreSQL
 - Anti-flood
+- Rate limit no login do editor do Node-RED
 - Anti-duplicidade
 - Fallback humano
 - Sem exposição de Redis/Postgres no host
@@ -39,6 +40,7 @@ RECOMENDAÇÕES EXTRAS
 - Ative BitLocker no Windows para criptografia em repouso
 - Rode firewall_hardening.ps1 como administrador
 - Use rotação com WEBHOOK_SECRET_PREVIOUS e WEBHOOK_HMAC_SECRET_PREVIOUS
+- Ajuste NODE_RED_LOGIN_RATE_LIMIT_* se precisar endurecer ainda mais o login do editor
 - Troque as chaves expostas anteriormente
 
 
