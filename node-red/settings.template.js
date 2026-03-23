@@ -1,4 +1,6 @@
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
 const webhookHmacSecrets = [__WEBHOOK_HMAC_SECRET__, __WEBHOOK_HMAC_SECRET_PREVIOUS__].filter(Boolean);
 const webhookSignatureMaxAgeMs = __WEBHOOK_SIGNATURE_MAX_AGE_MS__;
@@ -7,6 +9,31 @@ const loginRateLimitWindowMs = __LOGIN_RATE_LIMIT_WINDOW_MS__;
 const loginRateLimitMaxAttempts = __LOGIN_RATE_LIMIT_MAX_ATTEMPTS__;
 const loginRateLimitBlockMs = __LOGIN_RATE_LIMIT_BLOCK_MS__;
 const loginRateLimitStore = new Map();
+const auditLogDir = process.env.NODE_RED_AUDIT_LOG_DIR || '/data/logs';
+const auditLogFile = process.env.NODE_RED_AUDIT_LOG_FILE || 'node-red-audit.jsonl';
+const auditLogPath = path.join(auditLogDir, auditLogFile);
+
+function ensureAuditStream() {
+    fs.mkdirSync(auditLogDir, { recursive: true });
+    return fs.createWriteStream(auditLogPath, { flags: 'a', encoding: 'utf8' });
+}
+
+const auditStream = ensureAuditStream();
+
+function writeAuditEvent(event) {
+    auditStream.write(JSON.stringify({
+        recordedAt: new Date().toISOString(),
+        ...event
+    }) + '\n');
+}
+
+function logSecurityEvent(event, details) {
+    writeAuditEvent({
+        source: 'flowpluss',
+        event,
+        details: details || {}
+    });
+}
 
 function canonicalize(value) {
     if (value === null || typeof value !== 'object') {
@@ -94,11 +121,18 @@ function loginRateLimitMiddleware(req, res, next) {
     cleanupLoginRateLimitStore(now);
 
     const username = String(req.body?.username || '').trim().toLowerCase() || 'unknown';
-    const rateKey = `${getClientIp(req)}:${username}`;
+    const clientIp = getClientIp(req);
+    const rateKey = `${clientIp}:${username}`;
     const current = loginRateLimitStore.get(rateKey);
 
     if (current && current.blockedUntil > now) {
         const retryAfterSeconds = Math.max(1, Math.ceil((current.blockedUntil - now) / 1000));
+        logSecurityEvent('admin.login.blocked', {
+            username,
+            clientIp,
+            retryAfterSeconds,
+            blockedUntil: new Date(current.blockedUntil).toISOString()
+        });
         res.setHeader('Retry-After', String(retryAfterSeconds));
         res.status(429).json({ ok: false, error: 'too_many_login_attempts', retry_after_seconds: retryAfterSeconds });
         return;
@@ -108,8 +142,17 @@ function loginRateLimitMiddleware(req, res, next) {
         const finishedAt = Date.now();
         cleanupLoginRateLimitStore(finishedAt);
 
+        const baseEvent = {
+            username,
+            clientIp,
+            statusCode: res.statusCode,
+            method: req.method,
+            path: req.path
+        };
+
         if (res.statusCode < 400) {
             loginRateLimitStore.delete(rateKey);
+            logSecurityEvent('admin.login.success', baseEvent);
             return;
         }
 
@@ -125,6 +168,12 @@ function loginRateLimitMiddleware(req, res, next) {
         }
 
         loginRateLimitStore.set(rateKey, entry);
+        logSecurityEvent('admin.login.failure', {
+            ...baseEvent,
+            attemptCount: entry.count,
+            windowStartedAt: new Date(entry.windowStartedAt).toISOString(),
+            blockedUntil: entry.blockedUntil ? new Date(entry.blockedUntil).toISOString() : null
+        });
     });
 
     next();
@@ -162,6 +211,13 @@ module.exports = {
     httpNodeMiddleware: function(req, res, next) {
         if (req.method === 'POST' && req.path === '/evolution/webhook') {
             if (!hasValidWebhookSignature(req)) {
+                logSecurityEvent('webhook.signature.rejected', {
+                    clientIp: getClientIp(req),
+                    path: req.path,
+                    method: req.method,
+                    bodyDigest: String(req.headers['x-flowpluss-body-sha256'] || ''),
+                    timestamp: String(req.headers['x-flowpluss-timestamp'] || '')
+                });
                 res.status(401).json({ ok: false, error: 'invalid_webhook_signature' });
                 return;
             }
@@ -186,7 +242,18 @@ module.exports = {
         console: {
             level: "info",
             metrics: false,
-            audit: false
+            audit: true
+        },
+        auditTrail: {
+            level: "info",
+            metrics: false,
+            audit: true,
+            handler: function(msg) {
+                writeAuditEvent({
+                    source: 'node-red',
+                    ...msg
+                });
+            }
         }
     },
 
