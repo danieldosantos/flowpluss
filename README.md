@@ -24,6 +24,7 @@ A revisão desta versão removeu a confiança direta do Node-RED em um token de 
 - limita CORS do `httpNode` para origens explícitas;
 - adiciona mitigação de brute force no login do editor do Node-RED;
 - endurece o cookie do admin com `httpOnly` e `sameSite=strict`.
+- passa a registrar trilha de auditoria persistente em JSON Lines para login do editor, bloqueios por rate limit, rejeições de assinatura do webhook e eventos de auditoria do próprio Node-RED.
 
 ## Limitações que continuam válidas
 
@@ -58,6 +59,38 @@ Agora o endpoint de login do editor (`POST /auth/token`) recebe um rate limit de
 - **bloqueio temporário**: `30` minutos (`NODE_RED_LOGIN_RATE_LIMIT_BLOCK_MS=1800000`).
 
 Quando o limite é atingido, o Node-RED responde `429 Too Many Requests` com `Retry-After`. Isso reduz a suscetibilidade do editor a brute force caso o ambiente seja exposto além do loopback.
+
+## Auditoria de acesso do Node-RED
+
+A configuração do Node-RED agora deixa de depender só de `logging.console.level = "info"` e de *debug nodes* para troubleshooting. A stack passa a ter uma **trilha persistente de auditoria** em `NODE_RED_AUDIT_LOG_DIR/NODE_RED_AUDIT_LOG_FILE` (padrão: `/data/logs/node-red-audit.jsonl`), dentro do volume `nodered_data`.
+
+O arquivo registra em formato JSON Lines:
+
+- eventos de auditoria emitidos pelo próprio Node-RED quando `logging.console.audit` está habilitado;
+- `admin.login.success`, `admin.login.failure` e `admin.login.blocked`, com IP, usuário e status HTTP;
+- `webhook.signature.rejected`, para tentativas rejeitadas no endpoint `/evolution/webhook`.
+
+Isso cobre o ponto fraco visível no repositório: agora existe evidência persistente de **quem tentou acessar**, **quando** e **com qual resultado** nos pontos críticos de autenticação expostos aqui.
+
+### O que continua pendente de governança
+
+Esta mudança melhora bastante a trilha local, mas não substitui controles operacionais fora do repositório:
+
+- **retenção**: o volume Docker preserva os logs entre reinícios do container, mas a política de rotação/expurgo ainda deve ser definida no host;
+- **correlação**: se vocês precisarem investigação centralizada, o próximo passo é enviar esse JSONL para SIEM, Loki, ELK, Splunk ou coletor equivalente;
+- **incidentes**: os *debug nodes* continuam úteis para troubleshooting de fluxo, mas não devem ser tratados como auditoria formal;
+- **acesso ao host**: ainda vale revisar quem consegue ler o volume `nodered_data`, porque ele passa a conter evidência de acesso.
+
+### Variáveis novas de auditoria
+
+- `NODE_RED_AUDIT_LOG_DIR` (padrão: `/data/logs`)
+- `NODE_RED_AUDIT_LOG_FILE` (padrão: `node-red-audit.jsonl`)
+
+Exemplo de inspeção local após subir a stack:
+
+```bash
+docker compose exec node-red sh -lc 'tail -n 20 /data/logs/node-red-audit.jsonl'
+```
 
 ## Subida
 
