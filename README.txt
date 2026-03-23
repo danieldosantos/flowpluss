@@ -40,3 +40,10 @@ RECOMENDAÇÕES EXTRAS
 - Rode firewall_hardening.ps1 como administrador
 - Use rotação com WEBHOOK_SECRET_PREVIOUS e WEBHOOK_HMAC_SECRET_PREVIOUS
 - Troque as chaves expostas anteriormente
+
+
+REVISAO DE ACESSO EXTERNO
+- O bind em 127.0.0.1 ajuda, mas nao basta sozinho
+- Valide no host final com audit_external_access.ps1
+- Confirme ausencia de proxy reverso, tunel, VPN com publicacao externa, netsh portproxy e port-forward no roteador
+- Se o ambiente nao for Windows local, revise a estrategia de exposicao antes de usar em producao
