@@ -173,3 +173,46 @@ O bind em `127.0.0.1` no `docker-compose.yml` reduz a superfície de exposição
    - portas publicadas pelos containers Docker.
 
 Se o script acusar bind fora de loopback, ausência de firewall ou `portproxy`, trate isso como **falha de exposição**. Mesmo com tudo verde, ainda é necessário revisar manualmente proxy reverso, VPN/túnel e port-forward do roteador, porque isso depende da topologia real do ambiente.
+
+## Revisão de persistência no PostgreSQL (LGPD / minimização)
+
+Para reduzir superfície de exposição de dados pessoais, os `DATABASE_SAVE_*` da Evolution agora estão externalizados por variável de ambiente e com defaults mais restritivos no `docker-compose.yml`.
+
+### Defaults aplicados nesta revisão
+
+- `DATABASE_SAVE_DATA_INSTANCE=true`
+- `DATABASE_SAVE_DATA_NEW_MESSAGE=true`
+- `DATABASE_SAVE_MESSAGE_UPDATE=false`
+- `DATABASE_SAVE_DATA_CONTACTS=false`
+- `DATABASE_SAVE_DATA_CHATS=false`
+- `DATABASE_SAVE_DATA_HISTORIC=false`
+- `DATABASE_SAVE_DATA_LABELS=false`
+- `DATABASE_SAVE_IS_ON_WHATSAPP=false`
+- `DATABASE_SAVE_IS_ON_WHATSAPP_DAYS=7`
+- `DATABASE_DELETE_MESSAGE=true`
+
+> Objetivo: manter apenas o mínimo operacional para automação e reduzir retenção/acúmulo de dados pessoais no banco.
+
+### Como revisar o que está indo para banco
+
+1. Suba a stack com os valores desejados no `.env`.
+2. Rode o diagnóstico de esquema/colunas sensíveis:
+
+```bash
+cat postgres_privacy_review.sql | docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+```
+
+3. (Opcional) Rode consultas específicas por tabela de mensagens/contatos para medir retenção real por `created_at`.
+
+### Checklist objetivo de decisão (operação x privacidade)
+
+- **Que dados pessoais entram no banco?**
+  - valide tabelas e colunas de identificadores (telefone/JID/nome) e conteúdo de mensagem.
+- **Por quanto tempo ficam retidos?**
+  - defina janelas máximas por tipo de dado e execute limpeza periódica.
+- **Está aderente ao seu uso/política?**
+  - confirme se cada categoria persistida é necessária para o fluxo atual.
+- **Existe base legal/necessidade operacional para cada dado?**
+  - registre justificativa por categoria (execução contratual, legítimo interesse etc.).
+
+Se não houver justificativa clara para uma categoria, mantenha o respectivo `DATABASE_SAVE_*` em `false`.
