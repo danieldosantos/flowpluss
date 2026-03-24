@@ -34,6 +34,34 @@ A revisão desta versão removeu a confiança direta do Node-RED em um token de 
 - o token legado na URL continua existindo **somente** na borda Evolution -> gateway, por limitação prática do modo de integração atual. A autenticação efetiva do Node-RED agora é por assinatura HMAC.
 - o gateway também aceita token por `x-webhook-token` ou `Authorization: Bearer`, reduzindo dependência operacional de segredo em query string quando o emissor suportar cabeçalhos.
 
+## Hardening local adicional recomendado
+
+O estado atual já está **bom para cenário local controlado**, mas ainda vale implementar os itens abaixo para reduzir risco residual:
+
+1. **mTLS interno entre serviços (opcional avançado)**  
+   Se quiser reduzir confiança na rede Docker interna, adicione proxy sidecar (Caddy/Traefik/Nginx) com certificado interno entre Evolution, gateway e Node-RED.
+
+2. **Gestão de segredos fora do `.env`**  
+   Migrar segredos críticos para Docker secrets, Vault ou SOPS + age reduz exposição em histórico de shell, backup e editor.
+
+3. **Fail2ban/WAF no host (quando houver exposição por proxy)**  
+   Se publicar o Node-RED externamente, adicione bloqueio por IP no host/proxy além do rate limit da aplicação.
+
+4. **Rotação automática + runbook de incidente**  
+   Formalizar rotina mensal/trimestral para rotação de `NODE_RED_ADMIN_PASSWORD`, `NODE_RED_CREDENTIAL_SECRET`, `NODE_RED_COOKIE_SECRET`, `WEBHOOK_SECRET` e `WEBHOOK_HMAC_SECRET`.
+
+5. **Criptografia de volumes e backup seguro**  
+   O volume `nodered_data` contém trilhas de auditoria e metadados de segurança. Garanta criptografia em disco e backup com controle de acesso.
+
+6. **Retenção de log com rotação**  
+   Defina janela de retenção (ex.: 30/90 dias) e rotação do JSONL de auditoria para evitar crescimento indefinido e facilitar investigação.
+
+7. **Teste de restauração e de desastre**  
+   Simular recovery de PostgreSQL/Redis/Node-RED periodicamente garante que proteção e operação funcionem sob incidente real.
+
+8. **Validação contínua de exposição de portas**  
+   Rodar `audit_external_access.ps1` de forma periódica (ou em CI local) evita regressão de bind, firewall e portproxy.
+
 ## Variáveis novas
 
 Copie `.envexemplo` para `.env` e preencha especialmente:
