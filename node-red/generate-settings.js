@@ -18,6 +18,12 @@ const allowedOrigins = (process.env.NODE_RED_ALLOWED_ORIGINS || 'http://127.0.0.
 const loginRateLimitWindowMs = Number(process.env.NODE_RED_LOGIN_RATE_LIMIT_WINDOW_MS || '900000');
 const loginRateLimitMaxAttempts = Number(process.env.NODE_RED_LOGIN_RATE_LIMIT_MAX_ATTEMPTS || '5');
 const loginRateLimitBlockMs = Number(process.env.NODE_RED_LOGIN_RATE_LIMIT_BLOCK_MS || '1800000');
+const contextStorageMode = String(process.env.NODE_RED_CONTEXT_STORAGE || 'redis').trim().toLowerCase();
+const redisHost = String(process.env.REDIS_HOST || 'redis').trim();
+const redisPort = Number(process.env.REDIS_PORT || '6379');
+const redisDb = Number(process.env.REDIS_DB || '0');
+const redisPassword = String(process.env.REDIS_PASSWORD || '');
+const redisKeyPrefix = String(process.env.NODE_RED_REDIS_PREFIX || 'nodered:context:').trim();
 const adminPasswordMinLength = Number(process.env.NODE_RED_ADMIN_PASSWORD_MIN_LENGTH || '12');
 const adminPasswordRotationDays = Number(process.env.NODE_RED_ADMIN_PASSWORD_ROTATION_DAYS || '90');
 const metadataDir = process.env.NODE_RED_SECURITY_METADATA_DIR || '/data/security';
@@ -67,7 +73,8 @@ for (const placeholder of [
   '__NODE_RED_ALLOWED_ORIGINS__',
   '__LOGIN_RATE_LIMIT_WINDOW_MS__',
   '__LOGIN_RATE_LIMIT_MAX_ATTEMPTS__',
-  '__LOGIN_RATE_LIMIT_BLOCK_MS__'
+  '__LOGIN_RATE_LIMIT_BLOCK_MS__',
+  '__CONTEXT_STORAGE_CONFIG__'
 ]) {
   if (!template.includes(placeholder)) {
     throw new Error(`Missing placeholder ${placeholder} in settings.template.js`);
@@ -118,6 +125,50 @@ if (!Number.isFinite(loginRateLimitBlockMs) || loginRateLimitBlockMs < 1000) {
   throw new Error('NODE_RED_LOGIN_RATE_LIMIT_BLOCK_MS must be a number >= 1000');
 }
 
+if (!['redis', 'memory'].includes(contextStorageMode)) {
+  throw new Error('NODE_RED_CONTEXT_STORAGE must be either "redis" or "memory"');
+}
+
+if (!Number.isInteger(redisPort) || redisPort < 1 || redisPort > 65535) {
+  throw new Error('REDIS_PORT must be an integer between 1 and 65535');
+}
+
+if (!Number.isInteger(redisDb) || redisDb < 0 || redisDb > 15) {
+  throw new Error('REDIS_DB must be an integer between 0 and 15');
+}
+
+if (contextStorageMode === 'redis' && !redisHost) {
+  throw new Error('REDIS_HOST is required when NODE_RED_CONTEXT_STORAGE=redis');
+}
+
+if (contextStorageMode === 'redis' && !redisKeyPrefix) {
+  throw new Error('NODE_RED_REDIS_PREFIX must not be empty when NODE_RED_CONTEXT_STORAGE=redis');
+}
+
+const contextStorageConfig = contextStorageMode === 'redis'
+  ? {
+      default: 'redis',
+      redis: {
+        module: 'node-red-contrib-context-redis',
+        config: {
+          host: redisHost,
+          port: redisPort,
+          db: redisDb,
+          prefix: redisKeyPrefix,
+          password: redisPassword || undefined
+        }
+      },
+      memory: {
+        module: 'memory'
+      }
+    }
+  : {
+      default: 'memory',
+      memory: {
+        module: 'memory'
+      }
+    };
+
 const adminHash = bcrypt.hashSync(adminPassword, 10);
 const passwordFingerprint = derivePasswordFingerprint(adminPassword, credentialSecret);
 
@@ -131,7 +182,8 @@ const rendered = template
   .replace(/__NODE_RED_ALLOWED_ORIGINS__/g, JSON.stringify(allowedOrigins))
   .replace(/__LOGIN_RATE_LIMIT_WINDOW_MS__/g, String(loginRateLimitWindowMs))
   .replace(/__LOGIN_RATE_LIMIT_MAX_ATTEMPTS__/g, String(loginRateLimitMaxAttempts))
-  .replace(/__LOGIN_RATE_LIMIT_BLOCK_MS__/g, String(loginRateLimitBlockMs));
+  .replace(/__LOGIN_RATE_LIMIT_BLOCK_MS__/g, String(loginRateLimitBlockMs))
+  .replace(/__CONTEXT_STORAGE_CONFIG__/g, JSON.stringify(contextStorageConfig, null, 4));
 
 fs.writeFileSync('/data/settings.js', rendered, 'utf8');
 fs.mkdirSync(metadataDir, { recursive: true });
@@ -141,6 +193,12 @@ fs.writeFileSync(metadataPath, JSON.stringify({
   adminPasswordConfiguredFromEnv: true,
   adminPasswordMinLength,
   adminPasswordRotationDays,
+  nodeRedContextStorage: contextStorageMode,
+  redisContextStoreEnabled: contextStorageMode === 'redis',
+  redisContextHost: contextStorageMode === 'redis' ? redisHost : null,
+  redisContextPort: contextStorageMode === 'redis' ? redisPort : null,
+  redisContextDb: contextStorageMode === 'redis' ? redisDb : null,
+  redisContextPrefix: contextStorageMode === 'redis' ? redisKeyPrefix : null,
   adminPasswordFingerprint: passwordFingerprint,
   credentialSecretFingerprint: derivePasswordFingerprint(credentialSecret, cookieSecret),
   notes: [

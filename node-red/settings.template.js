@@ -231,12 +231,7 @@ module.exports = {
         sameSite: 'strict'
     },
 
-    contextStorage: {
-        default: "memory",
-        memory: {
-            module: "memory"
-        }
-    },
+    contextStorage: __CONTEXT_STORAGE_CONFIG__,
 
     logging: {
         console: {
