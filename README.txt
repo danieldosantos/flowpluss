@@ -52,3 +52,9 @@ REVISAO DE ACESSO EXTERNO
 - Valide no host final com audit_external_access.ps1
 - Confirme ausencia de proxy reverso, tunel, VPN com publicacao externa, netsh portproxy e port-forward no roteador
 - Se o ambiente nao for Windows local, revise a estrategia de exposicao antes de usar em producao
+
+REVISAO DE DADOS NO POSTGRESQL (LGPD)
+- Agora os DATABASE_SAVE_* da Evolution podem ser ajustados no .env.
+- O padrao ficou mais restritivo para reduzir persistencia ampla.
+- Use o arquivo postgres_privacy_review.sql para mapear tabelas/colunas com potencial dado pessoal.
+- Se um dado nao tiver base legal/necessidade operacional, deixe o flag correspondente em false.
