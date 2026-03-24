@@ -46,6 +46,41 @@ Copie `.envexemplo` para `.env` e preencha especialmente:
 - `NODE_RED_LOGIN_RATE_LIMIT_WINDOW_MS`
 - `NODE_RED_LOGIN_RATE_LIMIT_MAX_ATTEMPTS`
 - `NODE_RED_LOGIN_RATE_LIMIT_BLOCK_MS`
+- `NODE_RED_ADMIN_PASSWORD_MIN_LENGTH`
+- `NODE_RED_ADMIN_PASSWORD_ROTATION_DAYS`
+
+## Revisão do processo de senha do admin do Node-RED
+
+A stack passa a falhar na inicialização se houver dúvida operacional sobre a senha efetiva do editor do Node-RED:
+
+- `NODE_RED_ADMIN_PASSWORD` agora é **obrigatória** e não aceita fallback inseguro nem valores-placeholder como `troque-por-uma-senha-unica-e-forte`.
+- o hash bcrypt continua sendo gerado no boot, mas a entrada agora é validada antes de gerar `/data/settings.js`.
+- `NODE_RED_CREDENTIAL_SECRET` e `NODE_RED_COOKIE_SECRET` também precisam sair de placeholder, para reduzir risco de reaproveitar segredos fracos no mesmo ambiente.
+- a política mínima fica explícita por variável de ambiente: `NODE_RED_ADMIN_PASSWORD_MIN_LENGTH` (padrão `12`) e `NODE_RED_ADMIN_PASSWORD_ROTATION_DAYS` (padrão `90`).
+- o container grava um arquivo operacional em `/data/security/node-red-admin-auth.json` com usuário, política aplicada e um **fingerprint HMAC truncado** da senha efetiva. Isso permite confirmar qual senha está valendo sem registrar a senha em claro.
+
+### Como confirmar qual senha está valendo de fato
+
+1. confira o valor atual de `NODE_RED_ADMIN_PASSWORD` no `.env` do host;
+2. após subir a stack, compare com o fingerprint registrado:
+
+```bash
+docker compose exec node-red sh -lc 'cat /data/security/node-red-admin-auth.json'
+```
+
+3. se houver suspeita sobre histórico/local anterior, trate como incidente e rode rotação conjunta de:
+   - `NODE_RED_ADMIN_PASSWORD`
+   - `NODE_RED_CREDENTIAL_SECRET`
+   - `NODE_RED_COOKIE_SECRET`
+   - `WEBHOOK_SECRET` / `WEBHOOK_SECRET_PREVIOUS`
+   - `WEBHOOK_HMAC_SECRET` / `WEBHOOK_HMAC_SECRET_PREVIOUS`
+
+### Política operacional recomendada
+
+- manter a senha do admin fora de README, tickets, chats e histórico de shell;
+- registrar o responsável atual pela senha e a data da última rotação;
+- rotacionar no máximo a cada `90` dias, ou imediatamente após troca de operador / suspeita de exposição;
+- revisar cópias antigas de `.env`, exports de terminal, backups locais e qualquer pasta usada antes da recomendação de “trocar chaves expostas anteriormente”.
 
 
 ## Rate limit de login do Node-RED
