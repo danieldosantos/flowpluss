@@ -111,6 +111,16 @@ O arquivo registra em formato JSON Lines:
 
 Isso cobre o ponto fraco visível no repositório: agora existe evidência persistente de **quem tentou acessar**, **quando** e **com qual resultado** nos pontos críticos de autenticação expostos aqui.
 
+### Tratamento de debug nodes (produção x desenvolvimento)
+
+Como ajuste operacional para reduzir risco de exposição de conteúdo sensível:
+
+- os *debug nodes* do fluxo versionado (`node-red/flows_secure.json`) agora ficam **desativados por padrão** (`active: false`);
+- a observabilidade principal do ambiente passa a ser o **audit log estruturado** (`/data/logs/node-red-audit.jsonl`);
+- quando necessário para troubleshooting local, o operador pode reativar temporariamente os *debug nodes* no editor e deve desativá-los novamente ao finalizar a análise.
+
+> Recomendação: não tratar *debug sidebar* como trilha de auditoria. Use o JSONL persistente para evidência de operação e incidente.
+
 ### O que continua pendente de governança
 
 Esta mudança melhora bastante a trilha local, mas não substitui controles operacionais fora do repositório:
