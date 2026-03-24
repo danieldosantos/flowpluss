@@ -9,6 +9,8 @@ MISTRAL_API_KEY=troque-por-uma-chave-forte-da-mistral
 # Credenciais de administração do Node-RED
 NODE_RED_ADMIN_USER=admin
 NODE_RED_ADMIN_PASSWORD=troque-por-uma-senha-unica-e-forte
+NODE_RED_ADMIN_PASSWORD_MIN_LENGTH=12
+NODE_RED_ADMIN_PASSWORD_ROTATION_DAYS=90
 
 # Segredos internos
 WEBHOOK_SECRET=troque-por-um-token-legado-forte

@@ -41,6 +41,8 @@ RECOMENDAÇÕES EXTRAS
 - Rode firewall_hardening.ps1 como administrador
 - Use rotação com WEBHOOK_SECRET_PREVIOUS e WEBHOOK_HMAC_SECRET_PREVIOUS
 - Ajuste NODE_RED_LOGIN_RATE_LIMIT_* se precisar endurecer ainda mais o login do editor
+- Defina NODE_RED_ADMIN_PASSWORD_MIN_LENGTH=12 ou mais e NODE_RED_ADMIN_PASSWORD_ROTATION_DAYS=90
+- Confira a senha efetiva pelo arquivo /data/security/node-red-admin-auth.json dentro do container
 - Troque as chaves expostas anteriormente
 
 
