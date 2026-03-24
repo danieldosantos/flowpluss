@@ -181,8 +181,12 @@ services:
       NODE_RED_ADMIN_PASSWORD: ${NODE_RED_ADMIN_PASSWORD}
       NODE_RED_CREDENTIAL_SECRET: ${NODE_RED_CREDENTIAL_SECRET}
       NODE_RED_COOKIE_SECRET: ${NODE_RED_COOKIE_SECRET}
+      NODE_RED_CONTEXT_STORAGE: ${NODE_RED_CONTEXT_STORAGE:-redis}
+      NODE_RED_REDIS_PREFIX: ${NODE_RED_REDIS_PREFIX:-nodered:context:}
       REDIS_HOST: redis
-      REDIS_PORT: 6379
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_DB: ${REDIS_DB:-0}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
     volumes:
       - nodered_data:/data
       - ./node-red/flows_secure.json:/data/flows.json:rw

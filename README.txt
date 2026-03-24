@@ -11,7 +11,7 @@ O que já vem configurado:
 - Assinatura HMAC SHA-256 + timestamp entre gateway e Node-RED
 - Janela anti-replay configurável para webhook
 - Suporte a rotação de segredo atual/anterior
-- Memória do bot persistida no Redis
+- Memória do bot persistida no Redis (Node-RED contextStorage padrão = Redis)
 - Mensagens do WhatsApp persistidas pela Evolution no PostgreSQL
 - Anti-flood
 - Rate limit no login do editor do Node-RED
@@ -43,6 +43,7 @@ RECOMENDAÇÕES EXTRAS
 - Ajuste NODE_RED_LOGIN_RATE_LIMIT_* se precisar endurecer ainda mais o login do editor
 - Defina NODE_RED_ADMIN_PASSWORD_MIN_LENGTH=12 ou mais e NODE_RED_ADMIN_PASSWORD_ROTATION_DAYS=90
 - Confira a senha efetiva pelo arquivo /data/security/node-red-admin-auth.json dentro do container
+- Se precisar troubleshooting, force memória temporária com NODE_RED_CONTEXT_STORAGE=memory
 - Troque as chaves expostas anteriormente
 
 

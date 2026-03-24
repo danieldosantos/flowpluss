@@ -46,6 +46,8 @@ Copie `.envexemplo` para `.env` e preencha especialmente:
 - `NODE_RED_LOGIN_RATE_LIMIT_WINDOW_MS`
 - `NODE_RED_LOGIN_RATE_LIMIT_MAX_ATTEMPTS`
 - `NODE_RED_LOGIN_RATE_LIMIT_BLOCK_MS`
+- `NODE_RED_CONTEXT_STORAGE` (`redis` por padrão; use `memory` só para troubleshooting local)
+- `REDIS_HOST`, `REDIS_PORT`, `REDIS_DB`, `REDIS_PASSWORD` (opcional) e `NODE_RED_REDIS_PREFIX`
 - `NODE_RED_ADMIN_PASSWORD_MIN_LENGTH`
 - `NODE_RED_ADMIN_PASSWORD_ROTATION_DAYS`
 
@@ -126,6 +128,16 @@ Exemplo de inspeção local após subir a stack:
 ```bash
 docker compose exec node-red sh -lc 'tail -n 20 /data/logs/node-red-audit.jsonl'
 ```
+
+## Consistência documentação x implementação (contexto Redis)
+
+Esta revisão fecha a lacuna entre o que o projeto prometia e o que o container realmente gerava em `/data/settings.js`:
+
+- o `contextStorage` do Node-RED agora é gerado com **Redis por padrão** (`NODE_RED_CONTEXT_STORAGE=redis`);
+- o modo Redis usa o módulo já instalado no Dockerfile (`node-red-contrib-context-redis`) e parâmetros explícitos de conexão/prefixo;
+- o modo `memory` continua disponível apenas como fallback operacional.
+
+Com isso, a afirmação de “memória do bot persistida no Redis” deixa de depender de configuração implícita/incompleta e passa a ser verificável por variável de ambiente e pelo arquivo de metadata do boot.
 
 ## Subida
 
