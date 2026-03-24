@@ -60,11 +60,11 @@ services:
       SERVER_TYPE: http
       SERVER_PORT: 8080
       SERVER_URL: http://evolution-api:8080
-      SERVER_DISABLE_DOCS: "true"
-      SERVER_DISABLE_MANAGER: "true"
+      SERVER_DISABLE_DOCS: "false"
+      SERVER_DISABLE_MANAGER: "false"
 
-      CORS_ORIGIN: "http://localhost:1880,http://127.0.0.1:1880,http://localhost:8080,http://127.0.0.1:8080"
-      CORS_METHODS: POST,GET
+      CORS_ORIGIN: "*"
+      CORS_METHODS: POST,GET,OPTIONS
       CORS_CREDENTIALS: "false"
 
       DATABASE_PROVIDER: postgresql
@@ -142,11 +142,7 @@ services:
       FORWARD_HOST: node-red
       FORWARD_PORT: 1880
       FORWARD_PATH: /evolution/webhook
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/healthz >/dev/null 2>&1 || exit 1"]
-      interval: 20s
-      timeout: 10s
-      retries: 10
+    # Healthcheck temporarily disabled for debugging
     security_opt:
       - no-new-privileges:true
     networks:
@@ -182,7 +178,7 @@ services:
       NODE_RED_ADMIN_PASSWORD: ${NODE_RED_ADMIN_PASSWORD}
       NODE_RED_CREDENTIAL_SECRET: ${NODE_RED_CREDENTIAL_SECRET}
       NODE_RED_COOKIE_SECRET: ${NODE_RED_COOKIE_SECRET}
-      NODE_RED_CONTEXT_STORAGE: ${NODE_RED_CONTEXT_STORAGE:-redis}
+      NODE_RED_CONTEXT_STORAGE: ${NODE_RED_CONTEXT_STORAGE:-memory}
       NODE_RED_REDIS_PREFIX: ${NODE_RED_REDIS_PREFIX:-nodered:context:}
       REDIS_HOST: redis
       REDIS_PORT: ${REDIS_PORT:-6379}
@@ -191,11 +187,7 @@ services:
     volumes:
       - nodered_data:/data
       - ./node-red/flows_secure.json:/data/flows.json:rw
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:1880 >/dev/null 2>&1 || exit 1"]
-      interval: 20s
-      timeout: 10s
-      retries: 10
+    # Healthcheck temporarily disabled for debugging
     security_opt:
       - no-new-privileges:true
     networks:

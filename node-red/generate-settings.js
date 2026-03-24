@@ -3,32 +3,15 @@ const fs = require('fs');
 const path = require('path');
 const bcrypt = require('bcryptjs');
 
-const template = fs.readFileSync('/usr/src/node-red/settings.template.js', 'utf8');
+const template = fs.readFileSync('/usr/src/node-red/settings-simple.js', 'utf8');
 const adminUser = String(process.env.NODE_RED_ADMIN_USER || 'admin').trim();
 const adminPassword = String(process.env.NODE_RED_ADMIN_PASSWORD || '');
 const credentialSecret = String(process.env.NODE_RED_CREDENTIAL_SECRET || '');
-const cookieSecret = String(process.env.NODE_RED_COOKIE_SECRET || '');
-const webhookHmacSecret = process.env.WEBHOOK_HMAC_SECRET || '';
-const webhookHmacSecretPrevious = process.env.WEBHOOK_HMAC_SECRET_PREVIOUS || '';
-const webhookSignatureMaxAgeMs = Number(process.env.WEBHOOK_SIGNATURE_MAX_AGE_MS || '300000');
-const allowedOrigins = (process.env.NODE_RED_ALLOWED_ORIGINS || 'http://127.0.0.1:1880,http://localhost:1880')
-  .split(',')
-  .map((origin) => origin.trim())
-  .filter(Boolean);
-const loginRateLimitWindowMs = Number(process.env.NODE_RED_LOGIN_RATE_LIMIT_WINDOW_MS || '900000');
-const loginRateLimitMaxAttempts = Number(process.env.NODE_RED_LOGIN_RATE_LIMIT_MAX_ATTEMPTS || '5');
-const loginRateLimitBlockMs = Number(process.env.NODE_RED_LOGIN_RATE_LIMIT_BLOCK_MS || '1800000');
-const contextStorageMode = String(process.env.NODE_RED_CONTEXT_STORAGE || 'redis').trim().toLowerCase();
+const contextStorageMode = String(process.env.NODE_RED_CONTEXT_STORAGE || 'memory').trim().toLowerCase();
 const redisHost = String(process.env.REDIS_HOST || 'redis').trim();
 const redisPort = Number(process.env.REDIS_PORT || '6379');
 const redisDb = Number(process.env.REDIS_DB || '0');
 const redisPassword = String(process.env.REDIS_PASSWORD || '');
-const redisKeyPrefix = String(process.env.NODE_RED_REDIS_PREFIX || 'nodered:context:').trim();
-const adminPasswordMinLength = Number(process.env.NODE_RED_ADMIN_PASSWORD_MIN_LENGTH || '12');
-const adminPasswordRotationDays = Number(process.env.NODE_RED_ADMIN_PASSWORD_ROTATION_DAYS || '90');
-const metadataDir = process.env.NODE_RED_SECURITY_METADATA_DIR || '/data/security';
-const metadataFile = process.env.NODE_RED_SECURITY_METADATA_FILE || 'node-red-admin-auth.json';
-const metadataPath = path.join(metadataDir, metadataFile);
 
 function isPlaceholderValue(value) {
   const normalized = String(value || '').trim().toLowerCase();

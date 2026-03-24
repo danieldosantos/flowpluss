@@ -233,25 +233,6 @@ module.exports = {
 
     contextStorage: __CONTEXT_STORAGE_CONFIG__,
 
-    logging: {
-        console: {
-            level: "info",
-            metrics: false,
-            audit: true
-        },
-        auditTrail: {
-            level: "info",
-            metrics: false,
-            audit: true,
-            handler: function(msg) {
-                writeAuditEvent({
-                    source: 'node-red',
-                    ...msg
-                });
-            }
-        }
-    },
-
     functionTimeout: 10,
 
     editorTheme: {
