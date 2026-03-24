@@ -32,6 +32,7 @@ A revisão desta versão removeu a confiança direta do Node-RED em um token de 
 - se o editor do Node-RED for exposto por proxy reverso, túnel, VPN com publicação externa, `portproxy` ou bind fora de loopback, haverá risco de brute force e enumeração de credenciais, então o rate limit de login passa a ser obrigatório como defesa adicional, não substituta de isolamento de rede;
 - não foi adicionado login federado, OAuth, refresh token ou JWT de usuário final, porque o sistema atual é predominantemente **server-to-server/local**;
 - o token legado na URL continua existindo **somente** na borda Evolution -> gateway, por limitação prática do modo de integração atual. A autenticação efetiva do Node-RED agora é por assinatura HMAC.
+- o gateway também aceita token por `x-webhook-token` ou `Authorization: Bearer`, reduzindo dependência operacional de segredo em query string quando o emissor suportar cabeçalhos.
 
 ## Variáveis novas
 
@@ -40,6 +41,7 @@ Copie `.envexemplo` para `.env` e preencha especialmente:
 - `WEBHOOK_SECRET`
 - `WEBHOOK_HMAC_SECRET`
 - `WEBHOOK_SECRET_PREVIOUS` (opcional, durante rotação)
+- `WEBHOOK_SECRETS_CSV` (opcional, lista separada por vírgula para múltiplos emissores)
 - `WEBHOOK_HMAC_SECRET_PREVIOUS` (opcional, durante rotação)
 - `WEBHOOK_SIGNATURE_MAX_AGE_MS`
 - `NODE_RED_ALLOWED_ORIGINS`

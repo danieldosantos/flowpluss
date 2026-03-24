@@ -6,18 +6,25 @@ const forwardHost = process.env.FORWARD_HOST || 'node-red';
 const forwardPort = Number(process.env.FORWARD_PORT || '1880');
 const forwardPath = process.env.FORWARD_PATH || '/evolution/webhook';
 const signingSecret = process.env.WEBHOOK_HMAC_SECRET || '';
-const acceptedTokens = [
+const legacyAcceptedTokens = [
   process.env.WEBHOOK_SECRET || '',
   process.env.WEBHOOK_SECRET_PREVIOUS || ''
 ].filter(Boolean);
+const csvAcceptedTokens = String(process.env.WEBHOOK_SECRETS_CSV || '')
+  .split(',')
+  .map((token) => token.trim())
+  .filter(Boolean);
+const acceptedTokens = Array.from(new Set([...legacyAcceptedTokens, ...csvAcceptedTokens]));
 
 if (!signingSecret) {
   throw new Error('WEBHOOK_HMAC_SECRET is required');
 }
 
 if (acceptedTokens.length === 0) {
-  throw new Error('WEBHOOK_SECRET is required');
+  throw new Error('WEBHOOK_SECRET (or WEBHOOK_SECRETS_CSV) is required');
 }
+
+let lastQueryTokenWarningAt = 0;
 
 function canonicalize(value) {
   if (value === null || typeof value !== 'object') {
@@ -50,6 +57,39 @@ function isAcceptedToken(token) {
   return acceptedTokens.some((candidate) => safeEqual(candidate, token));
 }
 
+function readBearerToken(authorizationHeader) {
+  const value = String(authorizationHeader || '').trim();
+  if (!value) {
+    return '';
+  }
+
+  const match = /^Bearer\s+(.+)$/i.exec(value);
+  return match ? String(match[1] || '').trim() : '';
+}
+
+function readToken(req, url) {
+  const headerToken = String(req.headers['x-webhook-token'] || '').trim();
+  if (headerToken) {
+    return headerToken;
+  }
+
+  const bearerToken = readBearerToken(req.headers.authorization);
+  if (bearerToken) {
+    return bearerToken;
+  }
+
+  const queryToken = String(url.searchParams.get('token') || '').trim();
+  if (queryToken) {
+    const now = Date.now();
+    if (now - lastQueryTokenWarningAt > 10 * 60 * 1000) {
+      lastQueryTokenWarningAt = now;
+      console.warn('[webhook-gateway] query-string token detected; prefer x-webhook-token or Authorization: Bearer token');
+    }
+  }
+
+  return queryToken;
+}
+
 function respondJson(res, statusCode, payload) {
   res.writeHead(statusCode, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(payload));
@@ -68,7 +108,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  const token = url.searchParams.get('token') || '';
+  const token = readToken(req, url);
   if (!isAcceptedToken(token)) {
     respondJson(res, 401, { ok: false, error: 'invalid_token' });
     return;
