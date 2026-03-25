@@ -19,6 +19,17 @@ Portas publicadas no host (somente localhost):
 
 ---
 
+## 1.1) Flow pronto para importação
+
+Além do fluxo ativo em `node-red/flows_secure.json`, este repositório agora inclui uma cópia de importação rápida em:
+
+- `flows/whatsapp_secure_pro_corrigido.json`
+
+Esse arquivo já está ajustado para este projeto (Docker service `evolution-api`, endpoint `/evolution/webhook`, uso de `MISTRAL_API_KEY` e `EVOLUTION_API_KEY`) e aceita configuração por ambiente de:
+
+- `EVOLUTION_INSTANCE`
+- `BOT_NUMBER`
+
 ## 2) Pré-requisitos (obrigatório)
 
 Antes de qualquer comando, confirme:
