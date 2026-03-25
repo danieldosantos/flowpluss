@@ -17,14 +17,18 @@
     "swaggerDoc": "",
     "x": 170,
     "y": 180,
-    "wires": [["fn_guard_fix"]]
+    "wires": [
+      [
+        "fn_guard_fix"
+      ]
+    ]
   },
   {
     "id": "fn_guard_fix",
     "type": "function",
     "z": "secure_tab_fix",
     "name": "Validação + segurança + memória",
-    "func": "const body = msg.payload || {};\nconst data = body.data || {};\nconst key = data.key || {};\nconst event = String(body.event || '').toLowerCase();\n\n// Configure no .env do Node-RED (somente dígitos)\nconst BOT_NUMBER = String(env.get('BOT_NUMBER') || '555196172712').replace(/\\D/g, '');\n\nfunction onlyDigits(v) {\n  return String(v || '').replace(/\\D/g, '');\n}\n\nfunction isGroupOrStatus(jid) {\n  jid = String(jid || '');\n  return jid.endsWith('@g.us') || jid === 'status@broadcast' || jid.includes('@newsletter');\n}\n\nfunction isRealWhatsappJid(jid) {\n  jid = String(jid || '');\n  return jid.endsWith('@s.whatsapp.net') || jid.endsWith('@c.us');\n}\n\nfunction looksLikeLid(jid) {\n  return String(jid || '').includes('@lid');\n}\n\nif (event !== 'messages.upsert') {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'evento_ignorado', event: body.event || null };\n  return [null, msg, null];\n}\n\nif (key.fromMe === true) {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'fromMe' };\n  return [null, msg, null];\n}\n\nconst instance = body.instance || body.instanceName || data.instance || data.instanceName || env.get('EVOLUTION_INSTANCE') || 'danielteste';\nconst pushName = body.pushName || data.pushName || 'Cliente';\n\nconst candidates = [\n  key.remoteJid,\n  data.remoteJid,\n  body.remoteJid,\n  key.participant,\n  data.participant,\n  key.remoteJidAlt,\n  body.senderPn,\n  data.senderPn,\n  body.sender,\n  data.sender\n].filter(Boolean);\n\nlet chosen = candidates.find(j => isRealWhatsappJid(j) && !isGroupOrStatus(j) && !looksLikeLid(j)) || '';\n\nif (!chosen) {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'jid_sem_numero_real', instance, candidates };\n  return [null, msg, null];\n}\n\nconst number = onlyDigits(chosen);\nif (!number) {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'numero_invalido', instance, chosen };\n  return [null, msg, null];\n}\n\nif (BOT_NUMBER && number === BOT_NUMBER) {\n  msg.statusCode = 200;\n  msg.payload = {\n    ok: true,\n    ignored: true,\n    reason: 'numero_do_proprio_bot',\n    instance,\n    chosen,\n    number,\n    botNumber: BOT_NUMBER,\n    candidates\n  };\n  return [null, msg, null];\n}\n\nlet receivedText = '';\nif (data.message) {\n  receivedText = data.message.conversation\n    || data.message.extendedTextMessage?.text\n    || data.message.imageMessage?.caption\n    || data.message.videoMessage?.caption\n    || data.message.documentMessage?.caption\n    || '';\n}\nreceivedText = String(receivedText || '').trim();\n\nif (!receivedText) {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'mensagem_sem_texto', instance, number };\n  return [null, msg, null];\n}\n\nconst dedupeWindowMs = 15000;\nconst now = Date.now();\nconst dedupeStore = flow.get('dedupeStore') || {};\nconst messageId = key.id || data.id || body.id || '';\nconst dedupeKey = messageId\n  ? `${instance}:${number}:msgid:${messageId}`\n  : `${instance}:${number}:text:${receivedText.toLowerCase()}`;\n\nfor (const k in dedupeStore) {\n  if (now - dedupeStore[k] > dedupeWindowMs) delete dedupeStore[k];\n}\n\nif (dedupeStore[dedupeKey] && (now - dedupeStore[dedupeKey] < dedupeWindowMs)) {\n  flow.set('dedupeStore', dedupeStore);\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'mensagem_duplicada', instance, number, dedupeKey };\n  return [null, msg, null];\n}\n\ndedupeStore[dedupeKey] = now;\nflow.set('dedupeStore', dedupeStore);\n\nconst floodWindowMs = 5000;\nconst floodStore = flow.get('floodStore') || {};\nconst floodKey = `${instance}:${number}`;\nif (floodStore[floodKey] && (now - floodStore[floodKey] < floodWindowMs)) {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'flood_bloqueado', instance, number, floodKey };\n  return [null, msg, null];\n}\n\nfloodStore[floodKey] = now;\nflow.set('floodStore', floodStore);\n\nconst memoryKey = `memory:${instance}:${number}`;\nlet history = flow.get(memoryKey) || [];\nhistory = Array.isArray(history) ? history.slice(-10) : [];\n\nmsg._meta = {\n  event,\n  instance,\n  pushName,\n  chosen,\n  number,\n  candidates,\n  receivedText,\n  dedupeKey,\n  memoryKey\n};\nmsg._history = history;\n\nreturn [msg, null, msg];",
+    "func": "const body = msg.payload || {};\nconst data = body.data || {};\nconst key = data.key || {};\nconst event = String(body.event || '').toLowerCase();\n\n// Configure no .env do Node-RED (somente dígitos)\nconst BOT_NUMBER = String(env.get('BOT_NUMBER') || '555196172712').replace(/\\D/g, '');\n\nfunction onlyDigits(v) {\n  return String(v || '').replace(/\\D/g, '');\n}\n\nfunction isGroupOrStatus(jid) {\n  jid = String(jid || '');\n  return jid.endsWith('@g.us') || jid === 'status@broadcast' || jid.includes('@newsletter');\n}\n\nfunction isRealWhatsappJid(jid) {\n  jid = String(jid || '');\n  return jid.endsWith('@s.whatsapp.net') || jid.endsWith('@c.us');\n}\n\nfunction looksLikeLid(jid) {\n  return String(jid || '').includes('@lid');\n}\n\nif (event !== 'messages.upsert') {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'evento_ignorado', event: body.event || null };\n  return [null, msg, null];\n}\n\nif (key.fromMe === true) {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'fromMe' };\n  return [null, msg, null];\n}\n\nconst instance = body.instance || body.instanceName || data.instance || data.instanceName || env.get('EVOLUTION_INSTANCE') || 'danielteste';\nconst pushName = body.pushName || data.pushName || 'Cliente';\n\nconst candidates = [\n  key.remoteJid,\n  data.remoteJid,\n  body.remoteJid,\n  key.participant,\n  data.participant,\n  key.remoteJidAlt,\n  body.senderPn,\n  data.senderPn,\n  body.sender,\n  data.sender\n].filter(Boolean);\n\nlet chosen = candidates.find(function(j) { return isRealWhatsappJid(j) && !isGroupOrStatus(j) && !looksLikeLid(j); }) || '';\n\nif (!chosen) {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'jid_sem_numero_real', instance, candidates };\n  return [null, msg, null];\n}\n\nconst number = onlyDigits(chosen);\nif (!number) {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'numero_invalido', instance, chosen };\n  return [null, msg, null];\n}\n\nif (BOT_NUMBER && number === BOT_NUMBER) {\n  msg.statusCode = 200;\n  msg.payload = {\n    ok: true,\n    ignored: true,\n    reason: 'numero_do_proprio_bot',\n    instance,\n    chosen,\n    number,\n    botNumber: BOT_NUMBER,\n    candidates\n  };\n  return [null, msg, null];\n}\n\nlet receivedText = '';\nif (data.message) {\n  const message = data.message || {};\n  const extended = message.extendedTextMessage || {};\n  const image = message.imageMessage || {};\n  const video = message.videoMessage || {};\n  const document = message.documentMessage || {};\n\n  receivedText = message.conversation\n    || extended.text\n    || image.caption\n    || video.caption\n    || document.caption\n    || '';\n}\nreceivedText = String(receivedText || '').trim();\n\nif (!receivedText) {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'mensagem_sem_texto', instance, number };\n  return [null, msg, null];\n}\n\nconst dedupeWindowMs = 15000;\nconst now = Date.now();\nconst dedupeStore = flow.get('dedupeStore') || {};\nconst messageId = key.id || data.id || body.id || '';\nconst dedupeKey = messageId\n  ? instance + ':' + number + ':msgid:' + messageId\n  : instance + ':' + number + ':text:' + receivedText.toLowerCase();\n\nfor (const k in dedupeStore) {\n  if (now - dedupeStore[k] > dedupeWindowMs) delete dedupeStore[k];\n}\n\nif (dedupeStore[dedupeKey] && (now - dedupeStore[dedupeKey] < dedupeWindowMs)) {\n  flow.set('dedupeStore', dedupeStore);\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'mensagem_duplicada', instance, number, dedupeKey };\n  return [null, msg, null];\n}\n\ndedupeStore[dedupeKey] = now;\nflow.set('dedupeStore', dedupeStore);\n\nconst floodWindowMs = 5000;\nconst floodStore = flow.get('floodStore') || {};\nconst floodKey = instance + ':' + number;\nif (floodStore[floodKey] && (now - floodStore[floodKey] < floodWindowMs)) {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'flood_bloqueado', instance, number, floodKey };\n  return [null, msg, null];\n}\n\nfloodStore[floodKey] = now;\nflow.set('floodStore', floodStore);\n\nconst memoryKey = 'memory:' + instance + ':' + number;\nlet history = flow.get(memoryKey) || [];\nhistory = Array.isArray(history) ? history.slice(-10) : [];\n\nmsg._meta = {\n  event,\n  instance,\n  pushName,\n  chosen,\n  number,\n  candidates,\n  receivedText,\n  dedupeKey,\n  memoryKey\n};\nmsg._history = history;\n\nreturn [msg, null, msg];",
     "outputs": 3,
     "timeout": "",
     "noerr": 0,
@@ -33,7 +37,18 @@
     "libs": [],
     "x": 470,
     "y": 180,
-    "wires": [["delay_queue_fix"], ["debug_ignored_fix", "resp_ignored_fix"], ["debug_prepare_fix"]]
+    "wires": [
+      [
+        "delay_queue_fix"
+      ],
+      [
+        "debug_ignored_fix",
+        "resp_ignored_fix"
+      ],
+      [
+        "debug_prepare_fix"
+      ]
+    ]
   },
   {
     "id": "delay_queue_fix",
@@ -54,7 +69,11 @@
     "outputs": 1,
     "x": 730,
     "y": 180,
-    "wires": [["fn_mistral_req_fix"]]
+    "wires": [
+      [
+        "fn_mistral_req_fix"
+      ]
+    ]
   },
   {
     "id": "fn_mistral_req_fix",
@@ -70,7 +89,11 @@
     "libs": [],
     "x": 1010,
     "y": 180,
-    "wires": [["http_mistral_fix"]]
+    "wires": [
+      [
+        "http_mistral_fix"
+      ]
+    ]
   },
   {
     "id": "http_mistral_fix",
@@ -90,14 +113,18 @@
     "headers": [],
     "x": 1240,
     "y": 180,
-    "wires": [["fn_format_send_fix"]]
+    "wires": [
+      [
+        "fn_format_send_fix"
+      ]
+    ]
   },
   {
     "id": "fn_format_send_fix",
     "type": "function",
     "z": "secure_tab_fix",
     "name": "Formatar resposta + persistir memória",
-    "func": "let aiText = '';\n\nif (typeof msg.payload === 'string') {\n  aiText = msg.payload;\n} else if (msg.payload?.choices?.[0]?.message?.content) {\n  aiText = msg.payload.choices[0].message.content;\n} else if (msg.payload?.message) {\n  aiText = msg.payload.message;\n} else if (msg.payload?.content) {\n  aiText = msg.payload.content;\n} else if (msg.payload?.text) {\n  aiText = msg.payload.text;\n}\n\nif (Array.isArray(aiText)) {\n  aiText = aiText.map(part => typeof part === 'string' ? part : (part?.text || '')).join(' ');\n}\n\naiText = String(aiText || '').trim();\nif (!aiText) {\n  aiText = 'Recebi sua mensagem. Em breve retorno com mais detalhes.';\n}\n\nconst memoryKey = msg._meta.memoryKey;\nlet history = flow.get(memoryKey) || [];\nhistory = Array.isArray(history) ? history : [];\n\nhistory.push({ role: 'user', content: msg._meta.receivedText, ts: Date.now() });\nhistory.push({ role: 'assistant', content: aiText, ts: Date.now() });\nhistory = history.slice(-10);\nflow.set(memoryKey, history);\n\nmsg.method = 'POST';\nmsg.url = `http://evolution-api:8080/message/sendText/${encodeURIComponent(msg._meta.instance)}`;\nmsg.headers = {\n  'Content-Type': 'application/json',\n  apikey: env.get('EVOLUTION_API_KEY')\n};\nmsg.payload = {\n  number: msg._meta.number,\n  text: aiText,\n  delay: 1000,\n  linkPreview: false\n};\n\nmsg._debug_ai = {\n  number: msg._meta.number,\n  instance: msg._meta.instance,\n  pergunta: msg._meta.receivedText,\n  resposta: aiText,\n  memoryKey: msg._meta.memoryKey,\n  dedupeKey: msg._meta.dedupeKey\n};\n\nreturn msg;",
+    "func": "let aiText = '';\nconst payload = msg.payload || {};\n\nif (typeof payload === 'string') {\n  aiText = payload;\n} else if (payload.choices && payload.choices[0] && payload.choices[0].message && payload.choices[0].message.content) {\n  aiText = payload.choices[0].message.content;\n} else if (payload.message) {\n  aiText = payload.message;\n} else if (payload.content) {\n  aiText = payload.content;\n} else if (payload.text) {\n  aiText = payload.text;\n}\n\nif (Array.isArray(aiText)) {\n  aiText = aiText.map(function(part) {\n    if (typeof part === 'string') return part;\n    if (part && part.text) return part.text;\n    return '';\n  }).join(' ');\n}\n\naiText = String(aiText || '').trim();\nif (!aiText) {\n  aiText = 'Recebi sua mensagem. Em breve retorno com mais detalhes.';\n}\n\nconst memoryKey = msg._meta.memoryKey;\nlet history = flow.get(memoryKey) || [];\nhistory = Array.isArray(history) ? history : [];\n\nhistory.push({ role: 'user', content: msg._meta.receivedText, ts: Date.now() });\nhistory.push({ role: 'assistant', content: aiText, ts: Date.now() });\nhistory = history.slice(-10);\nflow.set(memoryKey, history);\n\nmsg.method = 'POST';\nmsg.url = 'http://evolution-api:8080/message/sendText/' + encodeURIComponent(msg._meta.instance);\nmsg.headers = {\n  'Content-Type': 'application/json',\n  apikey: env.get('EVOLUTION_API_KEY')\n};\nmsg.payload = {\n  number: msg._meta.number,\n  text: aiText,\n  delay: 1000,\n  linkPreview: false\n};\n\nmsg._debug_ai = {\n  number: msg._meta.number,\n  instance: msg._meta.instance,\n  pergunta: msg._meta.receivedText,\n  resposta: aiText,\n  memoryKey: msg._meta.memoryKey,\n  dedupeKey: msg._meta.dedupeKey\n};\n\nreturn msg;",
     "outputs": 1,
     "timeout": "",
     "noerr": 0,
@@ -106,7 +133,12 @@
     "libs": [],
     "x": 1540,
     "y": 180,
-    "wires": [["debug_ai_fix", "http_evo_fix"]]
+    "wires": [
+      [
+        "debug_ai_fix",
+        "http_evo_fix"
+      ]
+    ]
   },
   {
     "id": "http_evo_fix",
@@ -126,7 +158,12 @@
     "headers": [],
     "x": 1780,
     "y": 180,
-    "wires": [["debug_evo_fix", "fn_ok_fix"]]
+    "wires": [
+      [
+        "debug_evo_fix",
+        "fn_ok_fix"
+      ]
+    ]
   },
   {
     "id": "fn_ok_fix",
@@ -142,7 +179,11 @@
     "libs": [],
     "x": 2040,
     "y": 180,
-    "wires": [["resp_ok_fix"]]
+    "wires": [
+      [
+        "resp_ok_fix"
+      ]
+    ]
   },
   {
     "id": "resp_ok_fix",
@@ -160,18 +201,25 @@
     "type": "catch",
     "z": "secure_tab_fix",
     "name": "Erro Mistral",
-    "scope": ["http_mistral_fix"],
+    "scope": [
+      "http_mistral_fix"
+    ],
     "uncaught": false,
     "x": 1240,
     "y": 310,
-    "wires": [["debug_error_fix", "fn_fallback_fix"]]
+    "wires": [
+      [
+        "debug_error_fix",
+        "fn_fallback_fix"
+      ]
+    ]
   },
   {
     "id": "fn_fallback_fix",
     "type": "function",
     "z": "secure_tab_fix",
     "name": "Fallback humano",
-    "func": "const memoryKey = msg._meta?.memoryKey;\nif (memoryKey) {\n  let history = flow.get(memoryKey) || [];\n  history = Array.isArray(history) ? history : [];\n  history.push({ role: 'user', content: msg._meta?.receivedText || '', ts: Date.now() });\n  history.push({ role: 'assistant', content: 'Recebi sua mensagem 👍 Estou finalizando um atendimento aqui e já te respondo melhor.', ts: Date.now() });\n  history = history.slice(-10);\n  flow.set(memoryKey, history);\n}\n\nmsg.method = 'POST';\nmsg.url = `http://evolution-api:8080/message/sendText/${encodeURIComponent(msg._meta?.instance || env.get('EVOLUTION_INSTANCE') || 'danielteste')}`;\nmsg.headers = {\n  'Content-Type': 'application/json',\n  apikey: env.get('EVOLUTION_API_KEY')\n};\nmsg.payload = {\n  number: msg._meta?.number,\n  text: 'Recebi sua mensagem 👍\\n\\nEstou finalizando um atendimento aqui e já te respondo melhor.',\n  delay: 1000,\n  linkPreview: false\n};\nreturn msg;",
+    "func": "const meta = msg._meta || {};\nconst memoryKey = meta.memoryKey;\nif (memoryKey) {\n  let history = flow.get(memoryKey) || [];\n  history = Array.isArray(history) ? history : [];\n  history.push({ role: 'user', content: meta.receivedText || '', ts: Date.now() });\n  history.push({ role: 'assistant', content: 'Recebi sua mensagem 👍 Estou finalizando um atendimento aqui e já te respondo melhor.', ts: Date.now() });\n  history = history.slice(-10);\n  flow.set(memoryKey, history);\n}\n\nmsg.method = 'POST';\nconst instance = meta.instance || env.get('EVOLUTION_INSTANCE') || 'danielteste';\nmsg.url = 'http://evolution-api:8080/message/sendText/' + encodeURIComponent(instance);\nmsg.headers = {\n  'Content-Type': 'application/json',\n  apikey: env.get('EVOLUTION_API_KEY')\n};\nmsg.payload = {\n  number: meta.number,\n  text: 'Recebi sua mensagem 👍\\n\\nEstou finalizando um atendimento aqui e já te respondo melhor.',\n  delay: 1000,\n  linkPreview: false\n};\nreturn msg;",
     "outputs": 1,
     "timeout": "",
     "noerr": 0,
@@ -180,7 +228,11 @@
     "libs": [],
     "x": 1510,
     "y": 310,
-    "wires": [["http_evo_fix"]]
+    "wires": [
+      [
+        "http_evo_fix"
+      ]
+    ]
   },
   {
     "id": "debug_prepare_fix",
