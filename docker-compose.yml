@@ -186,7 +186,6 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
     volumes:
       - nodered_data:/data
-      - ./node-red/flows_secure.json:/data/flows.json:rw
     # Healthcheck temporarily disabled for debugging
     security_opt:
       - no-new-privileges:true

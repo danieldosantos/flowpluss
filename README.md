@@ -9,7 +9,7 @@ Serviços do `docker-compose.yml`:
 - `postgres` (PostgreSQL 15)
 - `redis` (Redis 7)
 - `evolution-api` (Evolution API v2.3.6)
-- `node-red` (fluxo principal em `node-red/flows_secure.json`)
+- `node-red` (inicia sem flow pré-carregado)
 - `webhook-gateway` (ponte de autenticação entre Evolution e Node-RED)
 
 Portas publicadas no host (somente localhost):
@@ -21,7 +21,8 @@ Portas publicadas no host (somente localhost):
 
 ## 1.1) Flow pronto para importação
 
-Além do fluxo ativo em `node-red/flows_secure.json`, este repositório agora inclui uma cópia de importação rápida em:
+O Node-RED sobe com `/data/flows.json` em branco (sem flow pré-definido).  
+Este repositório inclui uma cópia pronta para importação em:
 
 - `flows/whatsapp_secure_pro_corrigido.json`
 
