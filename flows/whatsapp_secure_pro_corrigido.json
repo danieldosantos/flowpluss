@@ -28,7 +28,7 @@
     "type": "function",
     "z": "secure_tab_fix",
     "name": "Validação + segurança + memória",
-    "func": "const body = msg.payload || {};\nconst data = body.data || {};\nconst key = data.key || {};\nconst event = String(body.event || '').toLowerCase();\n\n// Configure no .env do Node-RED (somente dígitos)\nconst BOT_NUMBER = String(env.get('BOT_NUMBER') || '555196172712').replace(/\\D/g, '');\n\nfunction onlyDigits(v) {\n  return String(v || '').replace(/\\D/g, '');\n}\n\nfunction safeContextSegment(v) {\n  return String(v || '')\n    .trim()\n    .replace(/\\s+/g, '_')\n    .replace(/[^a-zA-Z0-9:_-]/g, '');\n}\n\nfunction isGroupOrStatus(jid) {\n  jid = String(jid || '');\n  return jid.endsWith('@g.us') || jid === 'status@broadcast' || jid.includes('@newsletter');\n}\n\nfunction isRealWhatsappJid(jid) {\n  jid = String(jid || '');\n  return jid.endsWith('@s.whatsapp.net') || jid.endsWith('@c.us');\n}\n\nfunction looksLikeLid(jid) {\n  return String(jid || '').includes('@lid');\n}\n\nif (event !== 'messages.upsert') {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'evento_ignorado', event: body.event || null };\n  return [null, msg, null];\n}\n\nif (key.fromMe === true) {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'fromMe' };\n  return [null, msg, null];\n}\n\nconst instance = body.instance || body.instanceName || data.instance || data.instanceName || env.get('EVOLUTION_INSTANCE') || 'danielteste';\nconst pushName = body.pushName || data.pushName || 'Cliente';\n\nconst candidates = [\n  key.remoteJid,\n  data.remoteJid,\n  body.remoteJid,\n  key.participant,\n  data.participant,\n  key.remoteJidAlt,\n  body.senderPn,\n  data.senderPn,\n  body.sender,\n  data.sender\n].filter(Boolean);\n\nlet chosen = candidates.find(function(j) { return isRealWhatsappJid(j) && !isGroupOrStatus(j) && !looksLikeLid(j); }) || '';\n\nif (!chosen) {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'jid_sem_numero_real', instance, candidates };\n  return [null, msg, null];\n}\n\nconst number = onlyDigits(chosen);\nif (!number) {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'numero_invalido', instance, chosen };\n  return [null, msg, null];\n}\n\nif (BOT_NUMBER && number === BOT_NUMBER) {\n  msg.statusCode = 200;\n  msg.payload = {\n    ok: true,\n    ignored: true,\n    reason: 'numero_do_proprio_bot',\n    instance,\n    chosen,\n    number,\n    botNumber: BOT_NUMBER,\n    candidates\n  };\n  return [null, msg, null];\n}\n\nlet receivedText = '';\nif (data.message) {\n  const message = data.message || {};\n  const extended = message.extendedTextMessage || {};\n  const image = message.imageMessage || {};\n  const video = message.videoMessage || {};\n  const document = message.documentMessage || {};\n\n  receivedText = message.conversation\n    || extended.text\n    || image.caption\n    || video.caption\n    || document.caption\n    || '';\n}\nreceivedText = String(receivedText || '').trim();\n\nif (!receivedText) {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'mensagem_sem_texto', instance, number };\n  return [null, msg, null];\n}\n\nconst dedupeWindowMs = 15000;\nconst now = Date.now();\nconst dedupeStore = flow.get('dedupeStore') || {};\nconst messageId = key.id || data.id || body.id || '';\nconst dedupeKey = messageId\n  ? instance + ':' + number + ':msgid:' + messageId\n  : instance + ':' + number + ':text:' + receivedText.toLowerCase();\n\nfor (const k in dedupeStore) {\n  if (now - dedupeStore[k] > dedupeWindowMs) delete dedupeStore[k];\n}\n\nif (dedupeStore[dedupeKey] && (now - dedupeStore[dedupeKey] < dedupeWindowMs)) {\n  flow.set('dedupeStore', dedupeStore);\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'mensagem_duplicada', instance, number, dedupeKey };\n  return [null, msg, null];\n}\n\ndedupeStore[dedupeKey] = now;\nflow.set('dedupeStore', dedupeStore);\n\nconst floodWindowMs = 5000;\nconst floodStore = flow.get('floodStore') || {};\nconst floodKey = instance + ':' + number;\nif (floodStore[floodKey] && (now - floodStore[floodKey] < floodWindowMs)) {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'flood_bloqueado', instance, number, floodKey };\n  return [null, msg, null];\n}\n\nfloodStore[floodKey] = now;\nflow.set('floodStore', floodStore);\n\nconst memoryInstance = safeContextSegment(instance) || 'default';\nconst memoryNumber = safeContextSegment(number) || 'unknown';\nconst memoryKey = 'memory:' + memoryInstance + ':' + memoryNumber;\nlet history = flow.get(memoryKey) || [];\nhistory = Array.isArray(history) ? history.slice(-10) : [];\n\nmsg._meta = {\n  event,\n  instance,\n  pushName,\n  chosen,\n  number,\n  candidates,\n  receivedText,\n  dedupeKey,\n  memoryKey\n};\nmsg._history = history;\n\nreturn [msg, null, msg];",
+    "func": "const body = msg.payload || {};\nconst data = body.data || {};\nconst key = data.key || {};\nconst event = String(body.event || '').toLowerCase();\n\n// Configure no .env do Node-RED (somente dígitos)\nconst BOT_NUMBER = String(env.get('BOT_NUMBER') || '555196172712').replace(/\\D/g, '');\n\nfunction onlyDigits(v) {\n  return String(v || '').replace(/\\D/g, '');\n}\n\nfunction safeContextSegment(v) {\n  return String(v || '')\n    .trim()\n    .replace(/\\s+/g, '_')\n    .replace(/[^a-zA-Z0-9:_-]/g, '');\n}\n\nfunction isGroupOrStatus(jid) {\n  jid = String(jid || '');\n  return jid.endsWith('@g.us') || jid === 'status@broadcast' || jid.includes('@newsletter');\n}\n\nfunction isRealWhatsappJid(jid) {\n  jid = String(jid || '');\n  return jid.endsWith('@s.whatsapp.net') || jid.endsWith('@c.us');\n}\n\nfunction looksLikeLid(jid) {\n  return String(jid || '').includes('@lid');\n}\n\nif (event !== 'messages.upsert') {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'evento_ignorado', event: body.event || null };\n  return [null, msg, null];\n}\n\nif (key.fromMe === true) {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'fromMe' };\n  return [null, msg, null];\n}\n\nconst instance = body.instance || body.instanceName || data.instance || data.instanceName || env.get('EVOLUTION_INSTANCE') || 'danielteste';\nconst pushName = body.pushName || data.pushName || 'Cliente';\n\nconst candidates = [\n  key.remoteJid,\n  data.remoteJid,\n  body.remoteJid,\n  key.participant,\n  data.participant,\n  key.remoteJidAlt,\n  body.senderPn,\n  data.senderPn,\n  body.sender,\n  data.sender\n].filter(Boolean);\n\nlet chosen = candidates.find(function(j) { return isRealWhatsappJid(j) && !isGroupOrStatus(j) && !looksLikeLid(j); }) || '';\n\nif (!chosen) {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'jid_sem_numero_real', instance, candidates };\n  return [null, msg, null];\n}\n\nconst number = onlyDigits(chosen);\nif (!number) {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'numero_invalido', instance, chosen };\n  return [null, msg, null];\n}\n\nif (BOT_NUMBER && number === BOT_NUMBER) {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'numero_do_proprio_bot',\n    instance,\n    chosen,\n    number,\n    botNumber: BOT_NUMBER,\n    candidates\n  };\n  return [null, msg, null];\n}\n\nlet receivedText = '';\nif (data.message) {\n  const message = data.message || {};\n  const extended = message.extendedTextMessage || {};\n  const image = message.imageMessage || {};\n  const video = message.videoMessage || {};\n  const document = message.documentMessage || {};\n\n  receivedText = message.conversation\n    || extended.text\n    || image.caption\n    || video.caption\n    || document.caption\n    || '';\n}\nreceivedText = String(receivedText || '').trim();\n\nif (!receivedText) {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'mensagem_sem_texto', instance, number };\n  return [null, msg, null];\n}\n\nconst dedupeWindowMs = 15000;\nconst now = Date.now();\nconst dedupeStore = flow.get('dedupeStore') || {};\nconst messageId = key.id || data.id || body.id || '';\nconst dedupeKey = messageId\n  ? instance + ':' + number + ':msgid:' + messageId\n  : instance + ':' + number + ':text:' + receivedText.toLowerCase();\n\nfor (const k in dedupeStore) {\n  if (now - dedupeStore[k] > dedupeWindowMs) delete dedupeStore[k];\n}\n\nif (dedupeStore[dedupeKey] && (now - dedupeStore[dedupeKey] < dedupeWindowMs)) {\n  flow.set('dedupeStore', dedupeStore);\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'mensagem_duplicada', instance, number, dedupeKey };\n  return [null, msg, null];\n}\n\ndedupeStore[dedupeKey] = now;\nflow.set('dedupeStore', dedupeStore);\n\nconst floodWindowMs = 5000;\nconst floodStore = flow.get('floodStore') || {};\nconst floodKey = instance + ':' + number;\nif (floodStore[floodKey] && (now - floodStore[floodKey] < floodWindowMs)) {\n  msg.statusCode = 200;\n  msg.payload = { ok: true, ignored: true, reason: 'flood_bloqueado', instance, number, floodKey };\n  return [null, msg, null];\n}\n\nfloodStore[floodKey] = now;\nflow.set('floodStore', floodStore);\n\nconst memoryInstance = safeContextSegment(instance) || 'default';\nconst memoryNumber = safeContextSegment(number) || 'unknown';\nconst memoryKey = 'memory:' + memoryInstance + ':' + memoryNumber;\nlet history = flow.get(memoryKey) || [];\nhistory = Array.isArray(history) ? history.slice(-10) : [];\n\nmsg._meta = {\n  event,\n  instance,\n  pushName,\n  chosen,\n  number,\n  candidates,\n  receivedText,\n  dedupeKey,\n  memoryKey\n};\nmsg._history = history;\n\nreturn [msg, null, msg];",
     "outputs": 3,
     "timeout": "",
     "noerr": 0,
@@ -39,7 +39,7 @@
     "y": 180,
     "wires": [
       [
-        "switch_ai_provider"
+        "delay_queue_fix"
       ],
       [
         "debug_ignored_fix",
@@ -51,63 +51,7 @@
     ]
   },
   {
-    "id": "switch_ai_provider",
-    "type": "switch",
-    "z": "secure_tab_fix",
-    "name": "Escolher AI Provider",
-    "property": "payload",
-    "propertyType": "msg",
-    "rules": [
-      {
-        "t": "true",
-        "tot": "jsonata",
-        "dc": true,
-        "v": "$env('GROQ_API_KEY') and $length($env('GROQ_API_KEY')) > 10",
-        "vt": "jsonata"
-      },
-      {
-        "t": "else"
-      }
-    ],
-    "checkall": "true",
-    "repair": false,
-    "outputs": 2,
-    "x": 730,
-    "y": 180,
-    "wires": [
-      [
-        "delay_groq_fix"
-      ],
-      [
-        "delay_queue_fix"
-      ]
-    ]
-  },
-  {
-    "id": "delay_groq_fix",
-    "type": "delay",
-    "z": "secure_tab_fix",
-    "name": "Fila Groq 1 req / 2s",
-    "pauseType": "rate",
-    "timeout": "2",
-    "timeoutUnits": "seconds",
-    "rate": "1",
-    "nbRateUnits": "2",
-    "rateUnits": "second",
-    "randomFirst": "1",
-    "randomLast": "2",
-    "randomUnits": "seconds",
-    "drop": false,
-    "allowrate": false,
-    "outputs": 1,
-    "x": 1010,
-    "y": 140,
-    "wires": [
-      [
-        "fn_groq_req_fix"
-      ]
-    ]
-  },
+    "id": "delay_queue_fix",
     "type": "delay",
     "z": "secure_tab_fix",
     "name": "Fila IA 1 req / 20s",
@@ -132,85 +76,7 @@
     ]
   },
   {
-    "id": "fn_groq_req_fix",
-    "type": "function",
-    "z": "secure_tab_fix",
-    "name": "Montar request Groq (Alternativa)",
-    "func": "const groqKey = env.get('GROQ_API_KEY') || '';\n\nif (!groqKey || groqKey.length < 10) {\n  node.warn('Chave GROQ_API_KEY não configurada, usando Mistral');\n  // Fallback para Mistral se Groq não estiver configurado\n  return null;\n}\n\nconst history = msg._history || [];\nconst receivedText = msg._meta.receivedText || '';\n\n// Cache de respostas próximas (évita spam quando mesmo texto é enviado)\nconst cacheStore = flow.get('groqCache') || {};\nconst cacheKey = msg._meta.instance + ':' + msg._meta.number + ':' + receivedText.toLowerCase().substring(0, 50);\nconst now = Date.now();\nconst cacheTTL = 1800000; // 30 minutos\n\nif (cacheStore[cacheKey] && (now - cacheStore[cacheKey].timestamp < cacheTTL)) {\n  node.warn('Groq Cache hit para: ' + cacheKey);\n  msg.payload = cacheStore[cacheKey].response;\n  msg._cache_hit = true;\n  return msg;\n}\n\n// Limpar cache antigo\nfor (const k in cacheStore) {\n  if (now - cacheStore[k].timestamp > cacheTTL) delete cacheStore[k];\n}\nflow.set('groqCache', cacheStore);\n\nconst messages = [\n  {\n    role: 'system',\n    content: 'Você é um atendente profissional no WhatsApp. Responda em português do Brasil, seja claro, educado e objetivo, não invente informações, se faltar contexto peça mais detalhes, não diga que é IA a menos que perguntem e mantenha respostas curtas ou médias.'\n  }\n];\n\nfor (const item of history) {\n  if (item && item.role && item.content) {\n    messages.push({ role: item.role, content: item.content });\n  }\n}\n\nmessages.push({\n  role: 'user',\n  content: `Nome do cliente: ${msg._meta.pushName}\\nNúmero: ${msg._meta.number}\\n\\nMensagem atual do cliente:\\n${receivedText}`\n});\n\nmsg.method = 'POST';\nmsg.url = 'https://api.groq.com/openai/v1/chat/completions';\nmsg.headers = {\n  Authorization: 'Bearer ' + groqKey,\n  'Content-Type': 'application/json'\n};\nmsg.payload = {\n  model: 'llama3-8b-8192',\n  messages,\n  max_tokens: 300,\n  temperature: 0.3\n};\n\nmsg._groq_debug = {\n  url: msg.url,\n  keyPresent: groqKey ? 'Sim' : 'Não',\n  keyLength: groqKey.length,\n  messagesCount: messages.length,\n  cacheKey: cacheKey\n};\nmsg._cache_key = cacheKey;\nmsg._cache_store = cacheStore;\n\nreturn msg;",
-    "outputs": 1,
-    "timeout": "",
-    "noerr": 0,
-    "initialize": "",
-    "finalize": "",
-    "libs": [],
-    "x": 1010,
-    "y": 120,
-    "wires": [
-      [
-        "http_groq_fix"
-      ]
-    ]
-  },
-  {
-    "id": "http_groq_fix",
-    "type": "http request",
-    "z": "secure_tab_fix",
-    "name": "POST Groq",
-    "method": "use",
-    "ret": "obj",
-    "paytoqs": "ignore",
-    "url": "",
-    "tls": "",
-    "persist": false,
-    "proxy": "",
-    "insecureHTTPParser": false,
-    "authType": "",
-    "senderr": true,
-    "headers": [],
-    "x": 1240,
-    "y": 120,
-    "wires": [
-      [
-        "fn_format_groq_fix"
-      ]
-    ]
-  },
-  {
-    "id": "fn_format_groq_fix",
-    "type": "function",
-    "z": "secure_tab_fix",
-    "name": "Formatar resposta Groq",
-    "func": "let aiText = '';\nconst payload = msg.payload || {};\nconst statusCode = msg.statusCode || msg.status || 0;\nconst cacheHit = msg._cache_hit || false;\n\nif (!cacheHit) {\n  node.warn('Resposta Groq: statusCode=' + statusCode + ', tipo=' + typeof payload + ', chaves=' + Object.keys(payload).slice(0, 5).join(','));\n}\n\nif (statusCode >= 400) {\n  aiText = '';\n} else if (typeof payload === 'string') {\n  aiText = payload;\n} else if (payload.choices && payload.choices[0] && payload.choices[0].message && payload.choices[0].message.content) {\n  aiText = payload.choices[0].message.content;\n} else if (payload.message) {\n  aiText = payload.message;\n} else if (payload.content) {\n  aiText = payload.content;\n} else if (payload.text) {\n  aiText = payload.text;\n} else if (payload.error) {\n  aiText = '';\n}\n\nif (Array.isArray(aiText)) {\n  aiText = aiText.map(function(part) {\n    if (typeof part === 'string') return part;\n    if (part && part.text) return part.text;\n    return '';\n  }).join(' ');\n}\n\naiText = String(aiText || '').trim();\nif (!aiText || payload.error || aiText.toLowerCase().includes('rate limit') || statusCode >= 400) {\n  aiText = 'Recebi sua mensagem 👍\\n\\nEstou finalizando um atendimento aqui e já te respondo melhor.';\n}\n\n// Cachear resposta bem-sucedida se não veio do cache\nif (statusCode < 400 && aiText && !cacheHit && msg._cache_key && msg._cache_store) {\n  msg._cache_store[msg._cache_key] = {\n    response: aiText,\n    timestamp: Date.now()\n  };\n  flow.set('groqCache', msg._cache_store);\n  node.warn('Resposta Groq cacheada: ' + msg._cache_key);\n}\n\nconst memoryKey = msg._meta.memoryKey;\nlet history = flow.get(memoryKey) || [];\nhistory = Array.isArray(history) ? history : [];\n\nhistory.push({ role: 'user', content: msg._meta.receivedText, ts: Date.now() });\nhistory.push({ role: 'assistant', content: aiText, ts: Date.now() });\nhistory = history.slice(-10);\nflow.set(memoryKey, history);\n\nmsg.method = 'POST';\nmsg.url = 'http://evolution-api:8080/message/sendText/' + encodeURIComponent(msg._meta.instance);\nmsg.headers = {\n  'Content-Type': 'application/json',\n  apikey: env.get('EVOLUTION_API_KEY')\n};\nmsg.payload = {\n  number: msg._meta.number,\n  text: aiText,\n  delay: 1000,\n  linkPreview: false\n};\n\nmsg._debug_ai = {\n  number: msg._meta.number,\n  instance: msg._meta.instance,\n  pergunta: msg._meta.receivedText,\n  resposta: aiText,\n  memoryKey: msg._meta.memoryKey,\n  dedupeKey: msg._meta.dedupeKey,\n  groqStatus: statusCode,\n  cacheHit: cacheHit\n};\n\nreturn msg;",
-    "outputs": 1,
-    "timeout": "",
-    "noerr": 0,
-    "initialize": "",
-    "finalize": "",
-    "libs": [],
-    "x": 1540,
-    "y": 120,
-    "wires": [
-      [
-        "debug_groq_fix",
-        "http_evo_fix"
-      ]
-    ]
-  },
-  {
-    "id": "debug_groq_fix",
-    "type": "debug",
-    "z": "secure_tab_fix",
-    "name": "DEBUG Groq saída",
-    "active": false,
-    "tosidebar": true,
-    "console": false,
-    "tostatus": true,
-    "complete": "_debug_ai",
-    "targetType": "msg",
-    "x": 1760,
-    "y": 80,
-    "wires": []
-  },
+    "id": "fn_mistral_req_fix",
     "type": "function",
     "z": "secure_tab_fix",
     "name": "Montar request Mistral",
@@ -257,6 +123,7 @@
     "id": "fn_format_send_fix",
     "type": "function",
     "z": "secure_tab_fix",
+    "name": "Formatar resposta + persistir memória",
     "func": "let aiText = '';\nconst payload = msg.payload || {};\nconst statusCode = msg.statusCode || msg.status || 0;\nconst cacheHit = msg._cache_hit || false;\nconst rateLimitFallback = msg._rate_limit_fallback || false;\n\nif (!cacheHit && !rateLimitFallback) {\n  node.warn('Resposta Mistral: statusCode=' + statusCode + ', tipo=' + typeof payload + ', chaves=' + Object.keys(payload).slice(0, 5).join(','));\n}\n\n// Registrar erro 429 para evitar tentativas por 5 minutos\nif (statusCode === 429) {\n  const rateLimitStore = flow.get('rateLimitStore') || {};\n  const rateLimitKey = msg._meta.instance + ':' + msg._meta.number;\n  rateLimitStore[rateLimitKey] = Date.now();\n  flow.set('rateLimitStore', rateLimitStore);\n  node.warn('Rate limit 429 registrado para: ' + rateLimitKey);\n}\n\nif (statusCode >= 400) {\n  aiText = '';\n} else if (typeof payload === 'string') {\n  aiText = payload;\n} else if (payload.choices && payload.choices[0] && payload.choices[0].message && payload.choices[0].message.content) {\n  aiText = payload.choices[0].message.content;\n} else if (payload.message) {\n  aiText = payload.message;\n} else if (payload.content) {\n  aiText = payload.content;\n} else if (payload.text) {\n  aiText = payload.text;\n} else if (payload.error) {\n  aiText = '';\n}\n\nif (Array.isArray(aiText)) {\n  aiText = aiText.map(function(part) {\n    if (typeof part === 'string') return part;\n    if (part && part.text) return part.text;\n    return '';\n  }).join(' ');\n}\n\naiText = String(aiText || '').trim();\nif (!aiText || payload.error || aiText.toLowerCase().includes('rate limit') || statusCode >= 400) {\n  aiText = 'Recebi sua mensagem 👍\\n\\nEstou finalizando um atendimento aqui e já te respondo melhor.';\n}\n\n// Cachear resposta bem-sucedida se não veio do cache\nif (statusCode < 400 && aiText && !cacheHit && msg._cache_key && msg._cache_store) {\n  msg._cache_store[msg._cache_key] = {\n    response: aiText,\n    timestamp: Date.now()\n  };\n  flow.set('mistralCache', msg._cache_store);\n  node.warn('Resposta cacheada: ' + msg._cache_key);\n}\n\nconst memoryKey = msg._meta.memoryKey;\nlet history = flow.get(memoryKey) || [];\nhistory = Array.isArray(history) ? history : [];\n\nhistory.push({ role: 'user', content: msg._meta.receivedText, ts: Date.now() });\nhistory.push({ role: 'assistant', content: aiText, ts: Date.now() });\nhistory = history.slice(-10);\nflow.set(memoryKey, history);\n\nmsg.method = 'POST';\nmsg.url = 'http://evolution-api:8080/message/sendText/' + encodeURIComponent(msg._meta.instance);\nmsg.headers = {\n  'Content-Type': 'application/json',\n  apikey: env.get('EVOLUTION_API_KEY')\n};\nmsg.payload = {\n  number: msg._meta.number,\n  text: aiText,\n  delay: 1000,\n  linkPreview: false\n};\n\nmsg._debug_ai = {\n  number: msg._meta.number,\n  instance: msg._meta.instance,\n  pergunta: msg._meta.receivedText,\n  resposta: aiText,\n  memoryKey: msg._meta.memoryKey,\n  dedupeKey: msg._meta.dedupeKey,\n  mistralStatus: statusCode,\n  cacheHit: cacheHit,\n  rateLimitFallback: rateLimitFallback\n};\n\nreturn msg;",
     "outputs": 1,
     "timeout": "",
@@ -443,7 +310,7 @@
     "type": "debug",
     "z": "secure_tab_fix",
     "name": "DEBUG erro IA",
-    "active": false,
+    "active": true,
     "tosidebar": true,
     "console": false,
     "tostatus": true,

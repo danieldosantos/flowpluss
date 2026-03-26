@@ -159,34 +159,19 @@ services:
         condition: service_started
       redis:
         condition: service_healthy
+    env_file:
+      - .env
     ports:
       - "127.0.0.1:1880:1880"
     environment:
       TZ: America/Sao_Paulo
-      MISTRAL_API_KEY: ${MISTRAL_API_KEY}
-      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY}
-      WEBHOOK_HMAC_SECRET: ${WEBHOOK_HMAC_SECRET}
-      WEBHOOK_HMAC_SECRET_PREVIOUS: ${WEBHOOK_HMAC_SECRET_PREVIOUS:-}
-      WEBHOOK_SIGNATURE_MAX_AGE_MS: ${WEBHOOK_SIGNATURE_MAX_AGE_MS:-300000}
-      NODE_RED_ALLOWED_ORIGINS: ${NODE_RED_ALLOWED_ORIGINS:-http://localhost:1880,http://127.0.0.1:1880}
-      NODE_RED_LOGIN_RATE_LIMIT_WINDOW_MS: ${NODE_RED_LOGIN_RATE_LIMIT_WINDOW_MS:-900000}
-      NODE_RED_LOGIN_RATE_LIMIT_MAX_ATTEMPTS: ${NODE_RED_LOGIN_RATE_LIMIT_MAX_ATTEMPTS:-5}
-      NODE_RED_LOGIN_RATE_LIMIT_BLOCK_MS: ${NODE_RED_LOGIN_RATE_LIMIT_BLOCK_MS:-1800000}
-      NODE_RED_AUDIT_LOG_DIR: ${NODE_RED_AUDIT_LOG_DIR:-/data/logs}
-      NODE_RED_AUDIT_LOG_FILE: ${NODE_RED_AUDIT_LOG_FILE:-node-red-audit.jsonl}
-      NODE_RED_ADMIN_USER: ${NODE_RED_ADMIN_USER}
-      NODE_RED_ADMIN_PASSWORD: ${NODE_RED_ADMIN_PASSWORD}
-      NODE_RED_CREDENTIAL_SECRET: ${NODE_RED_CREDENTIAL_SECRET}
-      NODE_RED_COOKIE_SECRET: ${NODE_RED_COOKIE_SECRET}
-      NODE_RED_CONTEXT_STORAGE: ${NODE_RED_CONTEXT_STORAGE:-memory}
-      NODE_RED_REDIS_PREFIX: ${NODE_RED_REDIS_PREFIX:-nodered:context:}
+      NODE_RED_CONTEXT_STORAGE: memory
+      NODE_RED_REDIS_PREFIX: "nodered:context:"
       REDIS_HOST: redis
-      REDIS_PORT: ${REDIS_PORT:-6379}
-      REDIS_DB: ${REDIS_DB:-0}
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_PORT: 6379
+      REDIS_DB: 0
     volumes:
       - nodered_data:/data
-    # Healthcheck temporarily disabled for debugging
     security_opt:
       - no-new-privileges:true
     networks:
