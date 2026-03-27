@@ -5,6 +5,9 @@ USER root
 # Install bcryptjs for password hashing
 RUN cd /usr/src/node-red && npm install --unsafe-perm --no-update-notifier --no-fund bcryptjs
 
+# Ship hardened default flow inside the image for first-run bootstrap
+COPY flows_secure.json /usr/src/node-red/flows_secure.json
+
 # Create entrypoint script that generates settings and starts Node-RED
 RUN cat > /usr/src/node-red/init.js << 'EOF'
 const crypto = require('crypto');
@@ -59,6 +62,15 @@ RUN cat > /usr/src/node-red/entrypoint.sh << 'EOF'
 #!/bin/sh
 set -e
 node /usr/src/node-red/init.js
+
+FLOW_FILE="/data/flows.json"
+DEFAULT_FLOW="/usr/src/node-red/flows_secure.json"
+
+if [ ! -s "$FLOW_FILE" ] || grep -Eq '^[[:space:]]*\[[[:space:]]*\][[:space:]]*$' "$FLOW_FILE"; then
+  cp "$DEFAULT_FLOW" "$FLOW_FILE"
+  echo "Bootstrapped /data/flows.json from hardened default flow"
+fi
+
 exec npm start -- --userDir /data --settings /data/settings.js
 EOF
 
