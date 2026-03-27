@@ -139,6 +139,32 @@ docker compose exec node-red sh -lc 'tail -n 20 /data/logs/node-red-audit.jsonl'
 
 ## 7) Erros comuns e correção rápida
 
+### Erro: `exec /usr/src/node-red/entrypoint.sh: no such file or directory`
+
+Causa comum:
+- Imagem do Node-RED buildada com cache antigo e/ou script com final de linha Windows (`CRLF`), o que quebra a execução do entrypoint no Linux.
+
+Correção:
+1. Rebuild sem cache e recriação do serviço:
+
+```bash
+docker compose build --no-cache node-red
+docker compose up -d --force-recreate node-red
+```
+
+2. Valide se o entrypoint existe e está executável:
+
+```bash
+docker compose run --rm --entrypoint sh node-red -lc 'ls -l /usr/src/node-red/entrypoint.sh && head -n 1 /usr/src/node-red/entrypoint.sh'
+```
+
+3. Se ainda falhar, remova o container e suba novamente:
+
+```bash
+docker compose rm -sf node-red
+docker compose up -d --build node-red
+```
+
 ### Erro: Node-RED não inicia por senha inválida
 
 Causa comum:
