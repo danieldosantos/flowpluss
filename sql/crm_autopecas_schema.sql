@@ -74,6 +74,31 @@ BEGIN
       'cancelado'
     );
   END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'documento_fiscal_tipo') THEN
+    CREATE TYPE documento_fiscal_tipo AS ENUM ('nfe', 'nfce', 'nfse', 'cte');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'documento_fiscal_status') THEN
+    CREATE TYPE documento_fiscal_status AS ENUM (
+      'rascunho',
+      'pendente_emissao',
+      'emitido',
+      'autorizado',
+      'denegado',
+      'cancelado',
+      'inutilizado',
+      'erro'
+    );
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'titulo_tipo') THEN
+    CREATE TYPE titulo_tipo AS ENUM ('receber', 'pagar');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'titulo_status') THEN
+    CREATE TYPE titulo_status AS ENUM ('aberto', 'parcial', 'pago', 'vencido', 'cancelado');
+  END IF;
 END$$;
 
 CREATE TABLE IF NOT EXISTS leads (
@@ -176,6 +201,137 @@ CREATE TABLE IF NOT EXISTS pedidos (
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT ck_pedido_fechado_precisa_pago
     CHECK (status <> 'fechado' OR pago_em IS NOT NULL)
+);
+
+CREATE TABLE IF NOT EXISTS fiscal_documentos (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  pedido_id uuid REFERENCES pedidos(id) ON DELETE SET NULL,
+  atendimento_id uuid REFERENCES atendimentos(id) ON DELETE SET NULL,
+  lead_id uuid REFERENCES leads(id) ON DELETE SET NULL,
+  tipo documento_fiscal_tipo NOT NULL,
+  status documento_fiscal_status NOT NULL DEFAULT 'rascunho',
+  numero text,
+  serie text,
+  chave_acesso text UNIQUE,
+  protocolo_autorizacao text,
+  ambiente text NOT NULL DEFAULT 'homologacao' CHECK (ambiente IN ('homologacao', 'producao')),
+  emissor_cnpj text,
+  destinatario_doc text,
+  valor_produtos numeric(14,2) NOT NULL DEFAULT 0,
+  valor_desconto numeric(14,2) NOT NULL DEFAULT 0,
+  valor_frete numeric(14,2) NOT NULL DEFAULT 0,
+  valor_total numeric(14,2) NOT NULL DEFAULT 0,
+  xml_url text,
+  pdf_url text,
+  payload_envio jsonb NOT NULL DEFAULT '{}'::jsonb,
+  payload_retorno jsonb NOT NULL DEFAULT '{}'::jsonb,
+  emitido_em timestamptz,
+  autorizado_em timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ck_fiscal_documentos_valores_nao_negativos CHECK (
+    valor_produtos >= 0
+    AND valor_desconto >= 0
+    AND valor_frete >= 0
+    AND valor_total >= 0
+  )
+);
+
+CREATE TABLE IF NOT EXISTS fiscal_documento_itens (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  documento_id uuid NOT NULL REFERENCES fiscal_documentos(id) ON DELETE CASCADE,
+  sku text,
+  descricao text NOT NULL,
+  ncm text,
+  cfop text,
+  cst text,
+  unidade text NOT NULL DEFAULT 'UN',
+  quantidade numeric(14,4) NOT NULL DEFAULT 0,
+  valor_unitario numeric(14,4) NOT NULL DEFAULT 0,
+  valor_total numeric(14,2) NOT NULL DEFAULT 0,
+  aliquota_icms numeric(6,2),
+  aliquota_pis numeric(6,2),
+  aliquota_cofins numeric(6,2),
+  detalhes jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ck_fiscal_itens_qtd_positiva CHECK (quantidade >= 0),
+  CONSTRAINT ck_fiscal_itens_valores_nao_negativos CHECK (
+    valor_unitario >= 0
+    AND valor_total >= 0
+  )
+);
+
+CREATE TABLE IF NOT EXISTS fiscal_eventos (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  documento_id uuid NOT NULL REFERENCES fiscal_documentos(id) ON DELETE CASCADE,
+  evento text NOT NULL,
+  status documento_fiscal_status NOT NULL,
+  protocolo text,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  criado_por text NOT NULL DEFAULT 'system',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS titulos_financeiros (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tipo titulo_tipo NOT NULL,
+  pedido_id uuid REFERENCES pedidos(id) ON DELETE SET NULL,
+  lead_id uuid REFERENCES leads(id) ON DELETE SET NULL,
+  documento_fiscal_id uuid REFERENCES fiscal_documentos(id) ON DELETE SET NULL,
+  descricao text NOT NULL,
+  categoria text,
+  centro_custo text,
+  valor_original numeric(14,2) NOT NULL DEFAULT 0,
+  valor_aberto numeric(14,2) NOT NULL DEFAULT 0,
+  valor_pago numeric(14,2) NOT NULL DEFAULT 0,
+  status titulo_status NOT NULL DEFAULT 'aberto',
+  forma_pagamento text,
+  competencia date,
+  vencimento_em timestamptz NOT NULL,
+  pago_em timestamptz,
+  referencia_externa text,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ck_titulos_valores_nao_negativos CHECK (
+    valor_original >= 0
+    AND valor_aberto >= 0
+    AND valor_pago >= 0
+  )
+);
+
+CREATE TABLE IF NOT EXISTS lancamentos_contabeis (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  titulo_id uuid REFERENCES titulos_financeiros(id) ON DELETE SET NULL,
+  pedido_id uuid REFERENCES pedidos(id) ON DELETE SET NULL,
+  tipo titulo_tipo NOT NULL,
+  conta_debito text NOT NULL,
+  conta_credito text NOT NULL,
+  historico text NOT NULL,
+  valor numeric(14,2) NOT NULL,
+  competencia date NOT NULL DEFAULT current_date,
+  origem text NOT NULL DEFAULT 'crm_autopecas',
+  referencia_externa text,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ck_lancamentos_valor_positivo CHECK (valor > 0)
+);
+
+CREATE TABLE IF NOT EXISTS erp_integracoes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  entidade text NOT NULL CHECK (entidade IN ('pedido', 'fiscal_documento', 'titulo_financeiro', 'lancamento_contabil')),
+  entidade_id uuid NOT NULL,
+  operacao text NOT NULL CHECK (operacao IN ('upsert', 'cancelar', 'baixar')),
+  status text NOT NULL DEFAULT 'pendente' CHECK (status IN ('pendente', 'enviado', 'confirmado', 'erro', 'descartado')),
+  tentativas integer NOT NULL DEFAULT 0,
+  ultima_tentativa_em timestamptz,
+  proxima_tentativa_em timestamptz,
+  erro_ultima_tentativa text,
+  payload_envio jsonb NOT NULL DEFAULT '{}'::jsonb,
+  payload_retorno jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS conciliacoes_pix (
@@ -392,6 +548,14 @@ CREATE INDEX IF NOT EXISTS idx_pos_venda_casos_relacoes ON pos_venda_casos(lead_
 CREATE INDEX IF NOT EXISTS idx_manutencoes_agendadas_status ON manutencoes_agendadas(status, agendado_para);
 CREATE INDEX IF NOT EXISTS idx_campanhas_retencao_ativas ON campanhas_retencao(ativa, inicio_em, fim_em);
 CREATE INDEX IF NOT EXISTS idx_campanhas_exec_lookup ON campanhas_retencao_execucoes(campanha_id, status, enviado_em DESC);
+CREATE INDEX IF NOT EXISTS idx_fiscal_documentos_status_tipo ON fiscal_documentos(status, tipo, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_fiscal_documentos_pedido ON fiscal_documentos(pedido_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_fiscal_eventos_documento ON fiscal_eventos(documento_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_titulos_financeiros_status_vencimento ON titulos_financeiros(status, tipo, vencimento_em);
+CREATE INDEX IF NOT EXISTS idx_titulos_financeiros_pedido ON titulos_financeiros(pedido_id, tipo, status);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_titulo_receber_por_pedido ON titulos_financeiros(tipo, pedido_id) WHERE tipo = 'receber';
+CREATE INDEX IF NOT EXISTS idx_lancamentos_contabeis_competencia ON lancamentos_contabeis(competencia, tipo, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_erp_integracoes_fila ON erp_integracoes(status, proxima_tentativa_em, created_at);
 
 CREATE OR REPLACE FUNCTION set_updated_at()
 RETURNS trigger AS $$
@@ -756,6 +920,150 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION registrar_evento_fiscal(
+  p_documento_id uuid,
+  p_evento text,
+  p_status documento_fiscal_status,
+  p_protocolo text DEFAULT NULL,
+  p_payload jsonb DEFAULT '{}'::jsonb
+)
+RETURNS uuid AS $$
+DECLARE
+  v_evento_id uuid;
+BEGIN
+  INSERT INTO fiscal_eventos (documento_id, evento, status, protocolo, payload, criado_por)
+  VALUES (
+    p_documento_id,
+    p_evento,
+    p_status,
+    p_protocolo,
+    COALESCE(p_payload, '{}'::jsonb),
+    COALESCE(current_setting('app.user', true), 'system')
+  )
+  RETURNING id INTO v_evento_id;
+
+  UPDATE fiscal_documentos
+  SET status = p_status,
+      protocolo_autorizacao = COALESCE(p_protocolo, protocolo_autorizacao),
+      autorizado_em = CASE WHEN p_status = 'autorizado' THEN now() ELSE autorizado_em END,
+      updated_at = now()
+  WHERE id = p_documento_id;
+
+  RETURN v_evento_id;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION sync_titulo_receber_pedido(p_pedido_id uuid)
+RETURNS uuid AS $$
+DECLARE
+  v_pedido pedidos%ROWTYPE;
+  v_atendimento atendimentos%ROWTYPE;
+  v_titulo_id uuid;
+  v_status titulo_status;
+  v_valor_aberto numeric(14,2);
+  v_valor_pago numeric(14,2);
+BEGIN
+  SELECT *
+    INTO v_pedido
+  FROM pedidos
+  WHERE id = p_pedido_id;
+
+  IF v_pedido.id IS NULL THEN
+    RETURN NULL;
+  END IF;
+
+  SELECT *
+    INTO v_atendimento
+  FROM atendimentos
+  WHERE id = v_pedido.atendimento_id;
+
+  v_status := CASE
+    WHEN v_pedido.status IN ('pago', 'fechado') THEN 'pago'::titulo_status
+    WHEN v_pedido.status = 'cancelado' THEN 'cancelado'::titulo_status
+    WHEN v_pedido.status = 'aguardando_pagamento' AND v_pedido.etapa_entrada_em < now() - interval '1 day' THEN 'vencido'::titulo_status
+    ELSE 'aberto'::titulo_status
+  END;
+
+  v_valor_pago := CASE WHEN v_status = 'pago' THEN COALESCE(v_pedido.total, 0) ELSE 0 END;
+  v_valor_aberto := GREATEST(COALESCE(v_pedido.total, 0) - v_valor_pago, 0);
+
+  INSERT INTO titulos_financeiros (
+    tipo, pedido_id, lead_id, descricao, categoria, centro_custo,
+    valor_original, valor_aberto, valor_pago, status, forma_pagamento,
+    competencia, vencimento_em, pago_em, referencia_externa, metadata
+  )
+  VALUES (
+    'receber',
+    v_pedido.id,
+    v_atendimento.lead_id,
+    'Contas a receber do pedido ' || v_pedido.id::text,
+    'venda_autopecas',
+    'comercial',
+    COALESCE(v_pedido.total, 0),
+    v_valor_aberto,
+    v_valor_pago,
+    v_status,
+    CASE WHEN v_pedido.pix_txid IS NOT NULL THEN 'pix' ELSE NULL END,
+    current_date,
+    COALESCE(v_pedido.etapa_entrada_em, v_pedido.created_at, now()) + interval '1 day',
+    CASE WHEN v_status = 'pago' THEN COALESCE(v_pedido.pago_em, now()) ELSE NULL END,
+    COALESCE(v_pedido.pix_txid, v_pedido.id::text),
+    jsonb_build_object('origem', 'pedido', 'pedido_status', v_pedido.status::text)
+  )
+  ON CONFLICT (tipo, pedido_id) WHERE (tipo = 'receber')
+  DO UPDATE
+  SET valor_original = EXCLUDED.valor_original,
+      valor_aberto = EXCLUDED.valor_aberto,
+      valor_pago = EXCLUDED.valor_pago,
+      status = EXCLUDED.status,
+      forma_pagamento = EXCLUDED.forma_pagamento,
+      vencimento_em = EXCLUDED.vencimento_em,
+      pago_em = EXCLUDED.pago_em,
+      referencia_externa = EXCLUDED.referencia_externa,
+      metadata = EXCLUDED.metadata,
+      updated_at = now()
+  RETURNING id INTO v_titulo_id;
+
+  RETURN v_titulo_id;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION trg_sync_titulo_receber_pedido()
+RETURNS trigger AS $$
+DECLARE
+  v_titulo_id uuid;
+BEGIN
+  v_titulo_id := sync_titulo_receber_pedido(NEW.id);
+
+  INSERT INTO erp_integracoes (entidade, entidade_id, operacao, status, payload_envio)
+  VALUES (
+    'titulo_financeiro',
+    v_titulo_id,
+    CASE WHEN NEW.status = 'cancelado' THEN 'cancelar' ELSE 'upsert' END,
+    'pendente',
+    jsonb_build_object('pedido_id', NEW.id, 'pedido_status', NEW.status::text)
+  );
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION trg_enfileirar_documento_fiscal_erp()
+RETURNS trigger AS $$
+BEGIN
+  INSERT INTO erp_integracoes (entidade, entidade_id, operacao, status, payload_envio)
+  VALUES (
+    'fiscal_documento',
+    NEW.id,
+    CASE WHEN NEW.status = 'cancelado' THEN 'cancelar' ELSE 'upsert' END,
+    'pendente',
+    jsonb_build_object('tipo', NEW.tipo::text, 'status', NEW.status::text, 'pedido_id', NEW.pedido_id)
+  );
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE OR REPLACE VIEW vw_estoque_disponibilidade AS
 SELECT
   e.sku,
@@ -1017,6 +1325,61 @@ FROM leads l
 LEFT JOIN retencao r
   ON r.lead_id = l.id;
 
+CREATE OR REPLACE VIEW vw_financeiro_titulos_abertos AS
+SELECT
+  tf.id AS titulo_id,
+  tf.tipo,
+  tf.status,
+  tf.pedido_id,
+  tf.lead_id,
+  tf.descricao,
+  tf.valor_original,
+  tf.valor_aberto,
+  tf.valor_pago,
+  tf.vencimento_em,
+  EXTRACT(EPOCH FROM (now() - tf.vencimento_em)) / 86400.0 AS dias_em_atraso,
+  CASE
+    WHEN tf.status = 'pago' THEN 'liquidado'
+    WHEN tf.status = 'cancelado' THEN 'cancelado'
+    WHEN tf.vencimento_em < now() THEN 'vencido'
+    WHEN tf.vencimento_em < now() + interval '24 hours' THEN 'vence_hoje'
+    ELSE 'a_vencer'
+  END AS situacao_financeira
+FROM titulos_financeiros tf
+WHERE tf.tipo = 'receber';
+
+CREATE OR REPLACE VIEW vw_fiscal_documentos_pendentes AS
+SELECT
+  fd.id AS documento_id,
+  fd.tipo,
+  fd.status,
+  fd.pedido_id,
+  fd.numero,
+  fd.serie,
+  fd.chave_acesso,
+  fd.valor_total,
+  fd.emitido_em,
+  fd.autorizado_em,
+  ei.status AS status_integracao_erp,
+  ei.tentativas,
+  ei.erro_ultima_tentativa,
+  CASE
+    WHEN fd.status IN ('erro', 'denegado') THEN 'acao_imediata'
+    WHEN fd.status IN ('rascunho', 'pendente_emissao') THEN 'emitir'
+    WHEN fd.status = 'emitido' AND (fd.autorizado_em IS NULL) THEN 'aguardando_autorizacao'
+    WHEN fd.status = 'autorizado' AND (ei.status IS NULL OR ei.status IN ('pendente', 'erro')) THEN 'sincronizar_erp'
+    ELSE 'ok'
+  END AS acao_recomendada
+FROM fiscal_documentos fd
+LEFT JOIN LATERAL (
+  SELECT e.status, e.tentativas, e.erro_ultima_tentativa
+  FROM erp_integracoes e
+  WHERE e.entidade = 'fiscal_documento'
+    AND e.entidade_id = fd.id
+  ORDER BY e.created_at DESC
+  LIMIT 1
+) ei ON true;
+
 DROP TRIGGER IF EXISTS trg_leads_updated_at ON leads;
 CREATE TRIGGER trg_leads_updated_at
 BEFORE UPDATE ON leads
@@ -1107,6 +1470,30 @@ BEFORE UPDATE ON campanhas_retencao_execucoes
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_fiscal_documentos_updated_at ON fiscal_documentos;
+CREATE TRIGGER trg_fiscal_documentos_updated_at
+BEFORE UPDATE ON fiscal_documentos
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_fiscal_documento_itens_updated_at ON fiscal_documento_itens;
+CREATE TRIGGER trg_fiscal_documento_itens_updated_at
+BEFORE UPDATE ON fiscal_documento_itens
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_titulos_financeiros_updated_at ON titulos_financeiros;
+CREATE TRIGGER trg_titulos_financeiros_updated_at
+BEFORE UPDATE ON titulos_financeiros
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_erp_integracoes_updated_at ON erp_integracoes;
+CREATE TRIGGER trg_erp_integracoes_updated_at
+BEFORE UPDATE ON erp_integracoes
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
 DROP TRIGGER IF EXISTS trg_leads_status_log ON leads;
 CREATE TRIGGER trg_leads_status_log
 AFTER INSERT OR UPDATE ON leads
@@ -1148,6 +1535,18 @@ CREATE TRIGGER trg_pedidos_sync_regua_cobranca
 AFTER INSERT OR UPDATE OF status, etapa_entrada_em ON pedidos
 FOR EACH ROW
 EXECUTE FUNCTION trg_sync_regua_cobranca();
+
+DROP TRIGGER IF EXISTS trg_pedidos_sync_titulo_receber ON pedidos;
+CREATE TRIGGER trg_pedidos_sync_titulo_receber
+AFTER INSERT OR UPDATE OF status, total, pago_em, etapa_entrada_em, pix_txid ON pedidos
+FOR EACH ROW
+EXECUTE FUNCTION trg_sync_titulo_receber_pedido();
+
+DROP TRIGGER IF EXISTS trg_fiscal_documentos_enfileirar_erp ON fiscal_documentos;
+CREATE TRIGGER trg_fiscal_documentos_enfileirar_erp
+AFTER INSERT OR UPDATE OF status, numero, serie, chave_acesso, autorizado_em ON fiscal_documentos
+FOR EACH ROW
+EXECUTE FUNCTION trg_enfileirar_documento_fiscal_erp();
 
 INSERT INTO pipeline_etapas (entidade, etapa, probabilidade_padrao, sla_minutos, alerta_gerente)
 VALUES

@@ -11,6 +11,9 @@ DECLARE
   v_reserva_qtd integer;
   v_curva_sku text;
   v_alerta_ruptura integer;
+  v_titulo_receber_id uuid;
+  v_documento_fiscal_id uuid;
+  v_fiscal_pendente integer;
   v_txid text := 'e2e-txid-' || substring(md5(clock_timestamp()::text) from 1 for 12);
 BEGIN
   INSERT INTO estoque (sku, descricao, categoria, quantidade_disponivel, estoque_minimo, preco_unitario, ativo)
@@ -96,6 +99,62 @@ BEGIN
       updated_at = now()
   WHERE id = v_pedido_id;
 
+  SELECT id
+    INTO v_titulo_receber_id
+  FROM titulos_financeiros
+  WHERE pedido_id = v_pedido_id
+    AND tipo = 'receber'
+  ORDER BY created_at DESC
+  LIMIT 1;
+
+  IF v_titulo_receber_id IS NULL THEN
+    RAISE EXCEPTION 'E2E CRM falhou: título financeiro de contas a receber não foi criado';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM titulos_financeiros
+    WHERE id = v_titulo_receber_id
+      AND status = 'pago'
+      AND valor_aberto = 0
+  ) THEN
+    RAISE EXCEPTION 'E2E CRM falhou: título financeiro não foi conciliado após fechamento/pagamento';
+  END IF;
+
+  INSERT INTO fiscal_documentos (
+    pedido_id,
+    atendimento_id,
+    lead_id,
+    tipo,
+    status,
+    numero,
+    serie,
+    valor_produtos,
+    valor_total,
+    emitido_em
+  )
+  VALUES (
+    v_pedido_id,
+    v_atendimento_id,
+    v_lead_id,
+    'nfe',
+    'emitido',
+    '1001',
+    '1',
+    150.00,
+    150.00,
+    now()
+  )
+  RETURNING id INTO v_documento_fiscal_id;
+
+  PERFORM registrar_evento_fiscal(
+    v_documento_fiscal_id,
+    'autorizacao_sucesso',
+    'autorizado',
+    'PROTOCOLO-E2E',
+    '{"status":"ok"}'::jsonb
+  );
+
   INSERT INTO leads (telefone, nome, status, motivo_perda, ultimo_retorno_em)
   VALUES (
     '5511777777777',
@@ -169,6 +228,16 @@ BEGIN
 
   IF v_alerta_ruptura < 1 THEN
     RAISE EXCEPTION 'E2E CRM falhou: alerta de ruptura com impacto não retornou para SKU sem estoque';
+  END IF;
+
+  SELECT count(*)
+    INTO v_fiscal_pendente
+  FROM vw_fiscal_documentos_pendentes
+  WHERE documento_id = v_documento_fiscal_id
+    AND acao_recomendada IN ('sincronizar_erp', 'ok');
+
+  IF v_fiscal_pendente < 1 THEN
+    RAISE EXCEPTION 'E2E CRM falhou: monitor fiscal não retornou documento autorizado';
   END IF;
 END $$;
 

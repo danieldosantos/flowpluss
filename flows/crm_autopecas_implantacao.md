@@ -19,6 +19,7 @@ Este projeto agora inclui os artefatos necessários para implantar o blueprint c
 - [x] Prioridade 1 de pós-venda e retenção: módulo de recompra, garantia, devolução/troca, recall e manutenção periódica por cliente/frota.
 - [x] Prioridade 3 de estoque: reserva automática ao montar proposta, cross-reference de equivalentes, curva ABC/giro por SKU e alerta de ruptura com impacto em vendas perdidas.
 - [x] Prioridade 4 de financeiro/compliance: conciliação PIX automática com tolerância, régua de cobrança para inadimplência e trilha de auditoria expandida de preço/desconto/status.
+- [x] Prioridade 2 fiscal/ERP: NFe/NFCe com trilha de eventos fiscais, contas a receber/pagar, lançamentos contábeis e fila de integração assíncrona com ERP.
 
 ## Como aplicar
 
@@ -107,6 +108,12 @@ Este projeto agora inclui os artefatos necessários para implantar o blueprint c
   - `conciliar_pix_automatico(...)` registra conciliações em `conciliacoes_pix` e marca pedido como `pago` quando a diferença está dentro da tolerância.
   - `regua_cobranca` agenda automaticamente as etapas D+0, D+1, D+3, D+7 e escalonamento humano (D+10) para pedidos em `aguardando_pagamento`.
   - `vw_inadimplencia_pedidos` classifica risco (`risco_baixo`, `risco_moderado`, `inadimplente`) e mostra etapa de cobrança mais recente.
+- Bloco fiscal/ERP de escala:
+  - `fiscal_documentos`, `fiscal_documento_itens` e `fiscal_eventos` para ciclo de emissão/autorização de NFe/NFCe.
+  - `titulos_financeiros` para contas a receber/pagar desvinculadas do fluxo apenas PIX.
+  - `lancamentos_contabeis` para exportar partidas débito/crédito por competência.
+  - `erp_integracoes` como fila resiliente (`pendente`/`enviado`/`confirmado`/`erro`) para integração com ERP externo.
+  - `vw_fiscal_documentos_pendentes` e `vw_financeiro_titulos_abertos` para operação diária fiscal/financeira.
 - Auditoria comercial expandida em `auditoria_comercial` para rastrear **quem alterou**:
   - `pedidos.status`
   - `pedidos.descontos`
