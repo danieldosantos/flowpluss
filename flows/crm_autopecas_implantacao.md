@@ -100,6 +100,9 @@ Este projeto agora inclui os artefatos necessários para implantar o blueprint c
 - A chave PIX oficial (`02445780012`) é fixada no schema de vendedores e usada no fluxo de cobrança.
 - Pedido fechado exige pagamento (`ck_pedido_fechado_precisa_pago`).
 - Mudanças de status são auditadas automaticamente por trigger (`log_status_change`).
+- Pipeline comercial profissional em `pipeline_etapas` com probabilidade padrão por estágio e SLA por etapa.
+- Motivo de perda obrigatório no lead perdido (`perdido_preco`, `sem_estoque`, `sem_retorno`, `comprou_concorrente`).
+- Alertas para gerente disponíveis na view `vw_alertas_gerente` (`lead_parado`, `pedido_sem_retorno`, `pagamento_pendente`).
 
 
 ## Fluxo único + menu principal (novo)
