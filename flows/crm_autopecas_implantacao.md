@@ -59,7 +59,7 @@ Este projeto agora inclui os artefatos necessários para implantar o blueprint c
    Exemplo mínimo para validar webhook (ajuste endpoint/token do seu flow):
 
    ```bash
-   curl -X POST "http://127.0.0.1:1880/webhook/bot" \
+   curl -X POST "http://127.0.0.1:1880/evolution/webhook" \
      -H "Content-Type: application/json" \
      -d '{
        "telefone": "5511999999999",
@@ -77,15 +77,15 @@ Este projeto agora inclui os artefatos necessários para implantar o blueprint c
    LIMIT 10;
 
    -- Pedidos recentes e status de pagamento
-   SELECT id, lead_id, status, valor_total, pago, updated_at
+   SELECT id, atendimento_id, status, total, pago_em, updated_at
    FROM pedidos
    ORDER BY updated_at DESC
    LIMIT 10;
 
    -- Auditoria de mudanças de status
-   SELECT entidade, entidade_id, status_anterior, status_novo, changed_at
+   SELECT entidade, entidade_id, de_status, para_status, data_evento
    FROM status_log
-   ORDER BY changed_at DESC
+   ORDER BY data_evento DESC
    LIMIT 20;
    ```
 
@@ -122,3 +122,14 @@ Considerando Node-RED em `http://127.0.0.1:1880`:
 - Clientes & Estoque: `http://127.0.0.1:1880/ui/#!/4`
 
 > Observação: o índice (`#!/0`, `#!/1`...) pode variar se você já tiver outras abas no Dashboard. Se variar, abra `/ui` e navegue pelo menu lateral.
+
+
+## Gate obrigatório antes de liberar para o comercial
+
+> **Prioridade 1 (“fazer vender sem quebrar”)**: somente liberar operação após executar e passar no E2E completo:
+
+```bash
+./tests/run_e2e_lead_to_fechamento.sh
+```
+
+Cadeia validada no teste: **lead → atendimento → pedido → PIX → pagamento → fechamento**.
