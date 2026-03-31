@@ -21,6 +21,7 @@ Este projeto agora inclui os artefatos necessários para implantar o blueprint c
 - [x] Catálogo técnico de aplicação veicular: relacionamento por marca/modelo/ano/motor/chassi com compatibilidade por SKU.
 - [x] Prioridade 4 de financeiro/compliance: conciliação PIX automática com tolerância, régua de cobrança para inadimplência e trilha de auditoria expandida de preço/desconto/status.
 - [x] Prioridade 2 fiscal/ERP: NFe/NFCe com trilha de eventos fiscais, contas a receber/pagar, lançamentos contábeis e fila de integração assíncrona com ERP.
+- [x] Prioridade 5 omnichannel e marketing de base: visão integrada de canais, campanhas segmentadas e automações de reativação da carteira inativa.
 
 ## Como aplicar
 
@@ -121,6 +122,11 @@ Este projeto agora inclui os artefatos necessários para implantar o blueprint c
   - `pedidos.subtotal`/`pedidos.total`
   - `estoque.preco_unitario`
 - Pipeline comercial profissional em `pipeline_etapas` com probabilidade padrão por estágio e SLA por etapa.
+- Omnichannel e marketing de base implementados com:
+  - `lead_canais_contato` para consolidar WhatsApp, telefone, email, redes sociais, site chat e SMS por cliente com opt-in.
+  - `segmentos_marketing`, `campanhas_marketing` e `campanhas_marketing_execucoes` para segmentação e disparos por canal.
+  - `automacoes_reativacao` + função `enfileirar_reativacao_carteira_inativa(...)` para reativar clientes sem interação.
+  - `vw_carteira_inativa` para priorização por dias sem contato e canal preferencial.
 - Motivo de perda obrigatório no lead perdido (`perdido_preco`, `sem_estoque`, `sem_retorno`, `comprou_concorrente`).
 - Alertas para gerente disponíveis na view `vw_alertas_gerente` (`lead_parado`, `pedido_sem_retorno`, `pagamento_pendente`).
 - Pós-venda/retensão implementados com:

@@ -46,6 +46,11 @@ O schema já contempla o bloco de **pós-venda e retenção** (alta prioridade),
 - agenda de manutenção periódica por cliente/frota;
 - segmentação de retenção para campanhas de recompra.
 
+Também contempla o bloco **Omnichannel e marketing de base** (prioridade 5), com:
+- visão integrada de canais por lead (WhatsApp, telefone, email, redes sociais, chat e SMS);
+- campanhas segmentadas por público/segmento;
+- automação de reativação de carteira inativa com fila de execuções por canal preferencial.
+
 Também contempla o bloco **Fiscal/ERP** (alta prioridade), com:
 - documentos fiscais de NFe/NFCe (status, eventos, XML/PDF e chave de acesso);
 - contas a receber/pagar com visão de inadimplência além do PIX operacional;
