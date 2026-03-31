@@ -1,36 +1,15 @@
 [
   {
-    "id": "crm_tab_bot",
+    "id": "crm_tab_unificado",
     "type": "tab",
-    "label": "CRM Autopeças - Bot",
+    "label": "CRM Autopeças - Fluxo Unificado",
     "disabled": false,
-    "info": "Triagem bot com coleta de dados mínimos e envio para fila humana."
-  },
-  {
-    "id": "crm_tab_humano",
-    "type": "tab",
-    "label": "CRM Autopeças - Humano/Vendas",
-    "disabled": false,
-    "info": "Roteamento para vendedor, proposta, pedido e confirmação de itens."
-  },
-  {
-    "id": "crm_tab_pix",
-    "type": "tab",
-    "label": "CRM Autopeças - PIX/Recibo",
-    "disabled": false,
-    "info": "Geração PIX, callback de pagamento, recibo e fechamento de venda."
-  },
-  {
-    "id": "crm_tab_dash",
-    "type": "tab",
-    "label": "CRM Autopeças - Dashboards",
-    "disabled": false,
-    "info": "KPIs operacionais, vendas, clientes, estoque e financeiro PIX."
+    "info": "Fluxo único com bot, atendimento humano, PIX e dashboards."
   },
   {
     "id": "crm_link_fila_humana",
     "type": "link out",
-    "z": "crm_tab_bot",
+    "z": "crm_tab_unificado",
     "name": "Fila humana",
     "mode": "link",
     "links": [
@@ -43,7 +22,7 @@
   {
     "id": "crm_webhook_whatsapp",
     "type": "http in",
-    "z": "crm_tab_bot",
+    "z": "crm_tab_unificado",
     "name": "Webhook Entrada WhatsApp",
     "url": "/crm/autopecas/webhook",
     "method": "post",
@@ -60,7 +39,7 @@
   {
     "id": "crm_fn_validate_hmac",
     "type": "function",
-    "z": "crm_tab_bot",
+    "z": "crm_tab_unificado",
     "name": "Valida Assinatura HMAC",
     "func": "const crypto = require('crypto');\nconst headerSig = msg.req?.headers?.['x-webhook-signature'] || '';\nconst raw = typeof msg.payload === 'string' ? msg.payload : JSON.stringify(msg.payload || {});\nconst secret = env.get('WEBHOOK_HMAC_SECRET') || '';\nif (!secret) {\n  msg.statusCode = 500;\n  msg.payload = { ok: false, error: 'WEBHOOK_HMAC_SECRET ausente' };\n  return [null, msg];\n}\nconst expected = crypto.createHmac('sha256', secret).update(raw).digest('hex');\nif (headerSig !== expected) {\n  msg.statusCode = 401;\n  msg.payload = { ok: false, error: 'assinatura_invalida' };\n  return [null, msg];\n}\nreturn [msg, null];",
     "outputs": 2,
@@ -87,7 +66,7 @@
   {
     "id": "crm_fn_normaliza_msg",
     "type": "function",
-    "z": "crm_tab_bot",
+    "z": "crm_tab_unificado",
     "name": "Normaliza Mensagem + contexto",
     "func": "const body = msg.payload || {};\nconst telefone = String(body.telefone || body.from || '').replace(/\\D/g, '');\nconst texto = String(body.mensagem || body.text || '').trim();\nconst conversa = flow.get('ctx:' + telefone) || {};\nmsg.crm = {\n  telefone,\n  texto,\n  nome: conversa.nome || body.nome || null,\n  empresa: conversa.empresa || body.empresa || null,\n  itens_interesse: conversa.itens_interesse || body.itens_interesse || null,\n  estado: conversa.estado || body.estado || null,\n  cidade: conversa.cidade || body.cidade || null\n};\nmsg.topic = 'SELECT * FROM leads WHERE telefone = $1 LIMIT 1';\nmsg.payload = [telefone];\nreturn msg;",
     "outputs": 1,
@@ -102,7 +81,7 @@
   {
     "id": "crm_pg_lead_by_phone",
     "type": "postgres",
-    "z": "crm_tab_bot",
+    "z": "crm_tab_unificado",
     "postgresdb": "crm_postgres_config",
     "name": "Identifica lead existente",
     "output": true,
@@ -119,7 +98,7 @@
   {
     "id": "crm_fn_valida_dados_minimos",
     "type": "function",
-    "z": "crm_tab_bot",
+    "z": "crm_tab_unificado",
     "name": "Valida dados mínimos",
     "func": "const leadAtual = (msg.payload && msg.payload[0]) || {};\nconst crm = msg.crm || {};\nconst merged = {\n  telefone: crm.telefone,\n  nome: crm.nome || leadAtual.nome || null,\n  empresa: crm.empresa || leadAtual.empresa || null,\n  itens_interesse: crm.itens_interesse || leadAtual.itens_interesse || null,\n  estado: crm.estado || leadAtual.estado || null,\n  cidade: crm.cidade || leadAtual.cidade || null\n};\nconst completo = Boolean(merged.nome && merged.itens_interesse);\nconst status = completo ? 'lead_qualificado_bot' : 'dados_incompletos';\nflow.set('ctx:' + merged.telefone, merged);\nmsg.crm = merged;\nmsg.crm.status = status;\nmsg.topic = `INSERT INTO leads (telefone, nome, empresa, itens_interesse, estado, cidade, origem, status)\nVALUES ($1,$2,$3,$4::jsonb,$5,$6,'whatsapp',$7)\nON CONFLICT (telefone) DO UPDATE SET\nnome = EXCLUDED.nome,\nempresa = EXCLUDED.empresa,\nitens_interesse = EXCLUDED.itens_interesse,\nestado = EXCLUDED.estado,\ncidade = EXCLUDED.cidade,\nstatus = EXCLUDED.status,\nupdated_at = now()\nRETURNING *`;\nmsg.payload = [merged.telefone, merged.nome, merged.empresa, JSON.stringify(merged.itens_interesse || []), merged.estado, merged.cidade, status];\nreturn [msg, completo ? null : msg];",
     "outputs": 2,
@@ -137,7 +116,7 @@
   {
     "id": "crm_pg_upsert_lead",
     "type": "postgres",
-    "z": "crm_tab_bot",
+    "z": "crm_tab_unificado",
     "postgresdb": "crm_postgres_config",
     "name": "Salva/Atualiza lead",
     "output": true,
@@ -155,7 +134,7 @@
   {
     "id": "crm_template_transferencia",
     "type": "template",
-    "z": "crm_tab_bot",
+    "z": "crm_tab_unificado",
     "name": "Mensagem transferência",
     "field": "payload",
     "fieldType": "msg",
@@ -174,7 +153,7 @@
   {
     "id": "crm_template_dados_incompletos",
     "type": "template",
-    "z": "crm_tab_bot",
+    "z": "crm_tab_unificado",
     "name": "Mensagem dados incompletos",
     "field": "payload",
     "fieldType": "msg",
@@ -193,7 +172,7 @@
   {
     "id": "crm_http_resp_bot",
     "type": "http response",
-    "z": "crm_tab_bot",
+    "z": "crm_tab_unificado",
     "name": "HTTP Response Bot",
     "statusCode": "",
     "headers": {},
@@ -204,7 +183,7 @@
   {
     "id": "crm_link_in_humano",
     "type": "link in",
-    "z": "crm_tab_humano",
+    "z": "crm_tab_unificado",
     "name": "Recebe Lead Qualificado",
     "links": [
       "crm_link_fila_humana"
@@ -220,7 +199,7 @@
   {
     "id": "crm_fn_round_robin",
     "type": "function",
-    "z": "crm_tab_humano",
+    "z": "crm_tab_unificado",
     "name": "Distribui vendedor ativo",
     "func": "msg.topic = 'SELECT id, nome FROM vendedores WHERE ativo = true ORDER BY created_at';\nmsg.payload = [];\nreturn msg;",
     "outputs": 1,
@@ -235,7 +214,7 @@
   {
     "id": "crm_pg_vendedores_ativos",
     "type": "postgres",
-    "z": "crm_tab_humano",
+    "z": "crm_tab_unificado",
     "postgresdb": "crm_postgres_config",
     "name": "Busca vendedores ativos",
     "output": true,
@@ -252,7 +231,7 @@
   {
     "id": "crm_fn_abre_atendimento",
     "type": "function",
-    "z": "crm_tab_humano",
+    "z": "crm_tab_unificado",
     "name": "Abre atendimento + status",
     "func": "const rows = msg.payload || [];\nif (!rows.length) {\n  node.error('Nenhum vendedor ativo', msg);\n  return null;\n}\nlet idx = flow.get('vendedor_rr_idx') || 0;\nconst vendedor = rows[idx % rows.length];\nflow.set('vendedor_rr_idx', (idx + 1) % rows.length);\nconst leadId = (msg.payload_lead && msg.payload_lead.id) || (msg.crm_lead && msg.crm_lead.id) || (msg.crm && msg.crm.id) || null;\nmsg.crm_vendedor = vendedor;\nmsg.topic = `INSERT INTO atendimentos (lead_id, vendedor_id, status, canal, observacoes) VALUES ($1,$2,'transferido_vendedor','whatsapp',$3) RETURNING *`;\nmsg.payload = [leadId, vendedor.id, 'Auto-roteamento via round-robin'];\nreturn msg;",
     "outputs": 1,
@@ -267,7 +246,7 @@
   {
     "id": "crm_pg_cria_atendimento",
     "type": "postgres",
-    "z": "crm_tab_humano",
+    "z": "crm_tab_unificado",
     "postgresdb": "crm_postgres_config",
     "name": "Cria atendimento",
     "output": true,
@@ -284,7 +263,7 @@
   {
     "id": "crm_pg_consulta_estoque",
     "type": "postgres",
-    "z": "crm_tab_humano",
+    "z": "crm_tab_unificado",
     "postgresdb": "crm_postgres_config",
     "name": "Consulta estoque em tempo real",
     "output": true,
@@ -301,7 +280,7 @@
   {
     "id": "crm_template_proposta",
     "type": "template",
-    "z": "crm_tab_humano",
+    "z": "crm_tab_unificado",
     "name": "Monta proposta",
     "field": "payload",
     "fieldType": "msg",
@@ -320,7 +299,7 @@
   {
     "id": "crm_link_confirmacao_itens",
     "type": "link out",
-    "z": "crm_tab_humano",
+    "z": "crm_tab_unificado",
     "name": "Trigger confirmação de itens",
     "mode": "link",
     "links": [
@@ -333,7 +312,7 @@
   {
     "id": "crm_link_in_pix",
     "type": "link in",
-    "z": "crm_tab_pix",
+    "z": "crm_tab_unificado",
     "name": "Confirmação itens recebida",
     "links": [
       "crm_link_confirmacao_itens"
@@ -349,7 +328,7 @@
   {
     "id": "crm_fn_valida_total",
     "type": "function",
-    "z": "crm_tab_pix",
+    "z": "crm_tab_unificado",
     "name": "Valida total pedido",
     "func": "const total = Number(msg.total || msg.pedido?.total || 0);\nif (!(total > 0)) {\n  node.error('Total inválido para gerar PIX', msg);\n  return null;\n}\nmsg.pix = {\n  chave: '02445780012',\n  valor: total.toFixed(2),\n  descricao: `Pedido ${msg.pedido?.id || ''}`\n};\nreturn msg;",
     "outputs": 1,
@@ -364,7 +343,7 @@
   {
     "id": "crm_http_pix",
     "type": "http request",
-    "z": "crm_tab_pix",
+    "z": "crm_tab_unificado",
     "name": "Gerar PIX (gateway)",
     "method": "POST",
     "ret": "obj",
@@ -394,7 +373,7 @@
   {
     "id": "crm_fn_persist_pix",
     "type": "function",
-    "z": "crm_tab_pix",
+    "z": "crm_tab_unificado",
     "name": "Persistir PIX + status",
     "func": "const txid = msg.payload?.txid || msg.payload?.id;\nconst copia = msg.payload?.pix_copia_cola || msg.payload?.copiaecola;\nconst pedidoId = msg.pedido?.id;\nmsg.topic = `UPDATE pedidos SET pix_txid=$1, pix_copia_cola=$2, status='aguardando_pagamento', updated_at=now() WHERE id=$3 RETURNING *`;\nmsg.payload = [txid, copia, pedidoId];\nmsg.pix = { txid, copia };\nreturn msg;",
     "outputs": 1,
@@ -409,7 +388,7 @@
   {
     "id": "crm_pg_update_pedido_pix",
     "type": "postgres",
-    "z": "crm_tab_pix",
+    "z": "crm_tab_unificado",
     "postgresdb": "crm_postgres_config",
     "name": "Atualiza pedido aguardando_pagamento",
     "output": true,
@@ -427,7 +406,7 @@
   {
     "id": "crm_template_msg_pix",
     "type": "template",
-    "z": "crm_tab_pix",
+    "z": "crm_tab_unificado",
     "name": "Mensagem PIX gerado",
     "field": "payload",
     "fieldType": "msg",
@@ -446,7 +425,7 @@
   {
     "id": "crm_template_recibo_provisorio",
     "type": "template",
-    "z": "crm_tab_pix",
+    "z": "crm_tab_unificado",
     "name": "Recibo provisório HTML",
     "field": "recibo_html",
     "fieldType": "msg",
@@ -465,7 +444,7 @@
   {
     "id": "crm_webhook_pix_callback",
     "type": "http in",
-    "z": "crm_tab_pix",
+    "z": "crm_tab_unificado",
     "name": "Webhook confirmação PIX",
     "url": "/crm/autopecas/pix/callback",
     "method": "post",
@@ -482,7 +461,7 @@
   {
     "id": "crm_fn_valida_callback",
     "type": "function",
-    "z": "crm_tab_pix",
+    "z": "crm_tab_unificado",
     "name": "Valida TXID e valor",
     "func": "const txid = msg.payload?.txid;\nconst valor = Number(msg.payload?.valor || 0);\nif (!txid || !(valor > 0)) {\n  msg.statusCode = 400;\n  msg.payload = { ok: false, error: 'callback_invalido' };\n  return [null, msg];\n}\nmsg.topic = `UPDATE pedidos SET status='pago', pago_em=now(), updated_at=now() WHERE pix_txid=$1 AND total=$2 RETURNING id`;\nmsg.payload = [txid, valor];\nreturn [msg, null];",
     "outputs": 2,
@@ -500,7 +479,7 @@
   {
     "id": "crm_pg_set_pago",
     "type": "postgres",
-    "z": "crm_tab_pix",
+    "z": "crm_tab_unificado",
     "postgresdb": "crm_postgres_config",
     "name": "Atualiza pedido pago",
     "output": true,
@@ -517,7 +496,7 @@
   {
     "id": "crm_template_pagamento_confirmado",
     "type": "template",
-    "z": "crm_tab_pix",
+    "z": "crm_tab_unificado",
     "name": "Mensagem pagamento confirmado",
     "field": "payload",
     "fieldType": "msg",
@@ -536,7 +515,7 @@
   {
     "id": "crm_http_resp_pix",
     "type": "http response",
-    "z": "crm_tab_pix",
+    "z": "crm_tab_unificado",
     "name": "HTTP Response PIX",
     "statusCode": "",
     "headers": {},
@@ -547,7 +526,7 @@
   {
     "id": "crm_debug_pix",
     "type": "debug",
-    "z": "crm_tab_pix",
+    "z": "crm_tab_unificado",
     "name": "Debug PIX",
     "active": true,
     "tosidebar": true,
@@ -565,7 +544,8 @@
     "name": "Operação",
     "icon": "dashboard",
     "disabled": false,
-    "hidden": false
+    "hidden": false,
+    "order": 2
   },
   {
     "id": "crm_ui_group_operacao",
@@ -580,7 +560,7 @@
   {
     "id": "crm_inject_dashboard",
     "type": "inject",
-    "z": "crm_tab_dash",
+    "z": "crm_tab_unificado",
     "name": "Refresh KPIs",
     "props": [
       {
@@ -597,14 +577,17 @@
     "y": 100,
     "wires": [
       [
-        "crm_pg_kpis_operacao"
+        "crm_pg_kpis_operacao",
+        "crm_pg_kpis_vendas",
+        "crm_pg_kpis_financeiro",
+        "crm_pg_kpis_clientes"
       ]
     ]
   },
   {
     "id": "crm_pg_kpis_operacao",
     "type": "postgres",
-    "z": "crm_tab_dash",
+    "z": "crm_tab_unificado",
     "postgresdb": "crm_postgres_config",
     "name": "Query KPIs Operação",
     "output": true,
@@ -621,7 +604,7 @@
   {
     "id": "crm_fn_kpis_to_ui",
     "type": "function",
-    "z": "crm_tab_dash",
+    "z": "crm_tab_unificado",
     "name": "Map KPIs para dashboard",
     "func": "const row = (msg.payload && msg.payload[0]) || {};\nreturn [\n  { payload: Number(row.atendimentos_hoje || 0) },\n  { payload: Number(row.em_atendimento_humano || 0) },\n  { payload: Number(row.aguardando_pagamento || 0) }\n];",
     "outputs": 3,
@@ -642,7 +625,7 @@
   {
     "id": "crm_ui_txt_atendimentos_hoje",
     "type": "ui_text",
-    "z": "crm_tab_dash",
+    "z": "crm_tab_unificado",
     "group": "crm_ui_group_operacao",
     "order": 1,
     "width": 4,
@@ -658,7 +641,7 @@
   {
     "id": "crm_ui_txt_em_humano",
     "type": "ui_text",
-    "z": "crm_tab_dash",
+    "z": "crm_tab_unificado",
     "group": "crm_ui_group_operacao",
     "order": 2,
     "width": 4,
@@ -674,7 +657,7 @@
   {
     "id": "crm_ui_txt_aguardando_pag",
     "type": "ui_text",
-    "z": "crm_tab_dash",
+    "z": "crm_tab_unificado",
     "group": "crm_ui_group_operacao",
     "order": 3,
     "width": 4,
@@ -695,5 +678,359 @@
     "db": "flowpluss",
     "ssl": false,
     "name": "PostgreSQL CRM"
+  },
+  {
+    "id": "crm_ui_tab_menu",
+    "type": "ui_tab",
+    "name": "Menu CRM",
+    "icon": "home",
+    "disabled": false,
+    "hidden": false
+  },
+  {
+    "id": "crm_ui_group_menu",
+    "type": "ui_group",
+    "name": "Navegação",
+    "tab": "crm_ui_tab_menu",
+    "order": 1,
+    "disp": true,
+    "width": "12",
+    "collapse": false
+  },
+  {
+    "id": "crm_ui_menu_links",
+    "type": "ui_template",
+    "z": "crm_tab_unificado",
+    "group": "crm_ui_group_menu",
+    "name": "Menu principal de telas",
+    "order": 1,
+    "width": 12,
+    "height": 6,
+    "format": "html",
+    "storeOutMessages": false,
+    "fwdInMessages": true,
+    "resendOnRefresh": true,
+    "templateScope": "local",
+    "template": "<style>\n.crm-menu a { display:block; margin:8px 0; padding:10px 12px; border:1px solid #d9d9d9; border-radius:8px; text-decoration:none; color:#1f2937; font-weight:600; }\n.crm-menu a:hover { background:#f3f4f6; }\n.crm-menu small { color:#6b7280; }\n</style>\n<div class=\"crm-menu\">\n  <h3>Menu principal do CRM Autopeças</h3>\n  <p>Acesse as telas:</p>\n  <a href=\"/ui\" target=\"_blank\">🏠 Dashboard (home)</a>\n  <a href=\"/ui/#!/0\" target=\"_blank\">📍 Menu CRM</a>\n  <a href=\"/ui/#!/1\" target=\"_blank\">📊 Operação</a>\n  <a href=\"/ui/#!/2\" target=\"_blank\">💼 Vendas</a>\n  <a href=\"/ui/#!/3\" target=\"_blank\">💳 Financeiro PIX</a>\n  <a href=\"/ui/#!/4\" target=\"_blank\">📦 Clientes & Estoque</a>\n  <small>Se o índice mudar após importação, use o menu lateral do /ui.</small>\n</div>",
+    "x": 1010,
+    "y": 360,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "crm_ui_tab_vendas",
+    "type": "ui_tab",
+    "name": "Vendas",
+    "icon": "shopping_cart",
+    "order": 3,
+    "disabled": false,
+    "hidden": false
+  },
+  {
+    "id": "crm_ui_group_vendas",
+    "type": "ui_group",
+    "name": "KPIs de Vendas",
+    "tab": "crm_ui_tab_vendas",
+    "order": 1,
+    "disp": true,
+    "width": "12",
+    "collapse": false
+  },
+  {
+    "id": "crm_ui_tab_financeiro",
+    "type": "ui_tab",
+    "name": "Financeiro PIX",
+    "icon": "attach_money",
+    "order": 4,
+    "disabled": false,
+    "hidden": false
+  },
+  {
+    "id": "crm_ui_group_financeiro",
+    "type": "ui_group",
+    "name": "KPIs Financeiros",
+    "tab": "crm_ui_tab_financeiro",
+    "order": 1,
+    "disp": true,
+    "width": "12",
+    "collapse": false
+  },
+  {
+    "id": "crm_ui_tab_clientes",
+    "type": "ui_tab",
+    "name": "Clientes & Estoque",
+    "icon": "people",
+    "order": 5,
+    "disabled": false,
+    "hidden": false
+  },
+  {
+    "id": "crm_ui_group_clientes",
+    "type": "ui_group",
+    "name": "KPIs de Clientes e Estoque",
+    "tab": "crm_ui_tab_clientes",
+    "order": 1,
+    "disp": true,
+    "width": "12",
+    "collapse": false
+  },
+  {
+    "id": "crm_pg_kpis_vendas",
+    "type": "postgres",
+    "z": "crm_tab_unificado",
+    "postgresdb": "crm_postgres_config",
+    "name": "Query KPIs Vendas",
+    "output": true,
+    "perrow": false,
+    "query": "SELECT COUNT(*) FILTER (WHERE created_at::date = current_date) AS pedidos_hoje, COALESCE(SUM(total) FILTER (WHERE status = 'pago' AND pago_em::date = current_date),0) AS faturamento_hoje, COALESCE(AVG(total) FILTER (WHERE status = 'pago' AND pago_em::date = current_date),0) AS ticket_medio_hoje FROM pedidos",
+    "x": 430,
+    "y": 460,
+    "wires": [
+      [
+        "crm_fn_kpis_vendas_to_ui"
+      ]
+    ]
+  },
+  {
+    "id": "crm_fn_kpis_vendas_to_ui",
+    "type": "function",
+    "z": "crm_tab_unificado",
+    "name": "Map KPIs vendas",
+    "func": "const row = (msg.payload && msg.payload[0]) || {};\nreturn [\n  { payload: Number(row.pedidos_hoje || 0) },\n  { payload: Number(row.faturamento_hoje || 0).toFixed(2) },\n  { payload: Number(row.ticket_medio_hoje || 0).toFixed(2) }\n];",
+    "outputs": 3,
+    "x": 700,
+    "y": 460,
+    "wires": [
+      [
+        "crm_ui_txt_pedidos_hoje"
+      ],
+      [
+        "crm_ui_txt_faturamento_hoje"
+      ],
+      [
+        "crm_ui_txt_ticket_medio"
+      ]
+    ]
+  },
+  {
+    "id": "crm_ui_txt_pedidos_hoje",
+    "type": "ui_text",
+    "z": "crm_tab_unificado",
+    "group": "crm_ui_group_vendas",
+    "order": 1,
+    "width": 4,
+    "height": 1,
+    "name": "Pedidos hoje",
+    "label": "Pedidos hoje",
+    "format": "{{msg.payload}}",
+    "layout": "row-spread",
+    "x": 990,
+    "y": 420,
+    "wires": []
+  },
+  {
+    "id": "crm_ui_txt_faturamento_hoje",
+    "type": "ui_text",
+    "z": "crm_tab_unificado",
+    "group": "crm_ui_group_vendas",
+    "order": 2,
+    "width": 4,
+    "height": 1,
+    "name": "Faturamento hoje",
+    "label": "Faturamento hoje (R$)",
+    "format": "{{msg.payload}}",
+    "layout": "row-spread",
+    "x": 1000,
+    "y": 460,
+    "wires": []
+  },
+  {
+    "id": "crm_ui_txt_ticket_medio",
+    "type": "ui_text",
+    "z": "crm_tab_unificado",
+    "group": "crm_ui_group_vendas",
+    "order": 3,
+    "width": 4,
+    "height": 1,
+    "name": "Ticket médio",
+    "label": "Ticket médio hoje (R$)",
+    "format": "{{msg.payload}}",
+    "layout": "row-spread",
+    "x": 990,
+    "y": 500,
+    "wires": []
+  },
+  {
+    "id": "crm_pg_kpis_financeiro",
+    "type": "postgres",
+    "z": "crm_tab_unificado",
+    "postgresdb": "crm_postgres_config",
+    "name": "Query KPIs Financeiro PIX",
+    "output": true,
+    "perrow": false,
+    "query": "SELECT COUNT(*) FILTER (WHERE status = 'aguardando_pagamento') AS pedidos_aguardando_pix, COUNT(*) FILTER (WHERE status = 'pago' AND pago_em::date = current_date) AS pagamentos_confirmados_hoje, COALESCE(SUM(total) FILTER (WHERE status = 'pago' AND pago_em::date = current_date),0) AS recebido_hoje FROM pedidos",
+    "x": 450,
+    "y": 580,
+    "wires": [
+      [
+        "crm_fn_kpis_financeiro_to_ui"
+      ]
+    ]
+  },
+  {
+    "id": "crm_fn_kpis_financeiro_to_ui",
+    "type": "function",
+    "z": "crm_tab_unificado",
+    "name": "Map KPIs financeiro",
+    "func": "const row = (msg.payload && msg.payload[0]) || {};\nreturn [\n  { payload: Number(row.pedidos_aguardando_pix || 0) },\n  { payload: Number(row.pagamentos_confirmados_hoje || 0) },\n  { payload: Number(row.recebido_hoje || 0).toFixed(2) }\n];",
+    "outputs": 3,
+    "x": 720,
+    "y": 580,
+    "wires": [
+      [
+        "crm_ui_txt_aguardando_pix"
+      ],
+      [
+        "crm_ui_txt_pagamentos_hoje"
+      ],
+      [
+        "crm_ui_txt_recebido_hoje"
+      ]
+    ]
+  },
+  {
+    "id": "crm_ui_txt_aguardando_pix",
+    "type": "ui_text",
+    "z": "crm_tab_unificado",
+    "group": "crm_ui_group_financeiro",
+    "order": 1,
+    "width": 4,
+    "height": 1,
+    "name": "Aguardando PIX",
+    "label": "Pedidos aguardando PIX",
+    "format": "{{msg.payload}}",
+    "layout": "row-spread",
+    "x": 1000,
+    "y": 540,
+    "wires": []
+  },
+  {
+    "id": "crm_ui_txt_pagamentos_hoje",
+    "type": "ui_text",
+    "z": "crm_tab_unificado",
+    "group": "crm_ui_group_financeiro",
+    "order": 2,
+    "width": 4,
+    "height": 1,
+    "name": "Pagamentos confirmados",
+    "label": "Pagamentos confirmados hoje",
+    "format": "{{msg.payload}}",
+    "layout": "row-spread",
+    "x": 1020,
+    "y": 580,
+    "wires": []
+  },
+  {
+    "id": "crm_ui_txt_recebido_hoje",
+    "type": "ui_text",
+    "z": "crm_tab_unificado",
+    "group": "crm_ui_group_financeiro",
+    "order": 3,
+    "width": 4,
+    "height": 1,
+    "name": "Recebido hoje",
+    "label": "Recebido hoje (R$)",
+    "format": "{{msg.payload}}",
+    "layout": "row-spread",
+    "x": 1000,
+    "y": 620,
+    "wires": []
+  },
+  {
+    "id": "crm_pg_kpis_clientes",
+    "type": "postgres",
+    "z": "crm_tab_unificado",
+    "postgresdb": "crm_postgres_config",
+    "name": "Query KPIs Clientes/Estoque",
+    "output": true,
+    "perrow": false,
+    "query": "SELECT (SELECT COUNT(*) FROM leads WHERE created_at::date = current_date) AS novos_leads_hoje, (SELECT COUNT(*) FROM leads WHERE status = 'lead_qualificado_bot') AS leads_qualificados, (SELECT COUNT(*) FROM estoque WHERE ativo = true AND quantidade_disponivel <= 5) AS itens_estoque_baixo",
+    "x": 460,
+    "y": 700,
+    "wires": [
+      [
+        "crm_fn_kpis_clientes_to_ui"
+      ]
+    ]
+  },
+  {
+    "id": "crm_fn_kpis_clientes_to_ui",
+    "type": "function",
+    "z": "crm_tab_unificado",
+    "name": "Map KPIs clientes/estoque",
+    "func": "const row = (msg.payload && msg.payload[0]) || {};\nreturn [\n  { payload: Number(row.novos_leads_hoje || 0) },\n  { payload: Number(row.leads_qualificados || 0) },\n  { payload: Number(row.itens_estoque_baixo || 0) }\n];",
+    "outputs": 3,
+    "x": 740,
+    "y": 700,
+    "wires": [
+      [
+        "crm_ui_txt_novos_leads"
+      ],
+      [
+        "crm_ui_txt_leads_qualificados"
+      ],
+      [
+        "crm_ui_txt_estoque_baixo"
+      ]
+    ]
+  },
+  {
+    "id": "crm_ui_txt_novos_leads",
+    "type": "ui_text",
+    "z": "crm_tab_unificado",
+    "group": "crm_ui_group_clientes",
+    "order": 1,
+    "width": 4,
+    "height": 1,
+    "name": "Novos leads",
+    "label": "Novos leads hoje",
+    "format": "{{msg.payload}}",
+    "layout": "row-spread",
+    "x": 990,
+    "y": 660,
+    "wires": []
+  },
+  {
+    "id": "crm_ui_txt_leads_qualificados",
+    "type": "ui_text",
+    "z": "crm_tab_unificado",
+    "group": "crm_ui_group_clientes",
+    "order": 2,
+    "width": 4,
+    "height": 1,
+    "name": "Leads qualificados",
+    "label": "Leads qualificados",
+    "format": "{{msg.payload}}",
+    "layout": "row-spread",
+    "x": 1010,
+    "y": 700,
+    "wires": []
+  },
+  {
+    "id": "crm_ui_txt_estoque_baixo",
+    "type": "ui_text",
+    "z": "crm_tab_unificado",
+    "group": "crm_ui_group_clientes",
+    "order": 3,
+    "width": 4,
+    "height": 1,
+    "name": "Estoque baixo",
+    "label": "Itens com estoque baixo",
+    "format": "{{msg.payload}}",
+    "layout": "row-spread",
+    "x": 1000,
+    "y": 740,
+    "wires": []
   }
 ]
