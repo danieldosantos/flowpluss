@@ -106,6 +106,7 @@ CREATE TABLE IF NOT EXISTS leads (
   nome text,
   empresa text,
   telefone text NOT NULL UNIQUE,
+  tipo_cliente text NOT NULL DEFAULT 'varejo',
   estado text,
   cidade text,
   itens_interesse jsonb NOT NULL DEFAULT '[]'::jsonb,
@@ -120,6 +121,8 @@ CREATE TABLE IF NOT EXISTS leads (
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT ck_leads_probabilidade_valida
     CHECK (probabilidade_fechamento >= 0 AND probabilidade_fechamento <= 100),
+  CONSTRAINT ck_leads_tipo_cliente_valido
+    CHECK (tipo_cliente IN ('varejo', 'atacado', 'frota', 'oficina', 'seguradora', 'distribuidor')),
   CONSTRAINT ck_leads_motivo_perda_obrigatorio
     CHECK (
       (status = 'perdido_nao_convertido' AND motivo_perda IS NOT NULL)
@@ -432,7 +435,7 @@ CREATE TABLE IF NOT EXISTS status_log (
 
 CREATE TABLE IF NOT EXISTS auditoria_comercial (
   id bigserial PRIMARY KEY,
-  entidade text NOT NULL CHECK (entidade IN ('pedidos', 'estoque')),
+  entidade text NOT NULL CHECK (entidade IN ('pedidos', 'estoque', 'politica_preco', 'margem_minima')),
   entidade_id uuid NOT NULL,
   campo text NOT NULL,
   valor_anterior text,
@@ -440,6 +443,85 @@ CREATE TABLE IF NOT EXISTS auditoria_comercial (
   alterado_por text NOT NULL DEFAULT 'system',
   data_evento timestamptz NOT NULL DEFAULT now(),
   detalhes jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+
+
+CREATE TABLE IF NOT EXISTS perfis_comerciais (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  nome text NOT NULL UNIQUE,
+  descricao text,
+  ativo boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS politicas_margem (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  perfil_comercial_id uuid REFERENCES perfis_comerciais(id) ON DELETE CASCADE,
+  vendedor_id uuid REFERENCES vendedores(id) ON DELETE CASCADE,
+  margem_minima_percentual numeric(5,2) NOT NULL,
+  ativo boolean NOT NULL DEFAULT true,
+  inicio_vigencia timestamptz NOT NULL DEFAULT now(),
+  fim_vigencia timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ck_politicas_margem_faixa_valida
+    CHECK (margem_minima_percentual >= 0 AND margem_minima_percentual <= 100),
+  CONSTRAINT ck_politicas_margem_periodo_valido
+    CHECK (fim_vigencia IS NULL OR fim_vigencia >= inicio_vigencia),
+  CONSTRAINT ck_politicas_margem_escopo_obrigatorio
+    CHECK (perfil_comercial_id IS NOT NULL OR vendedor_id IS NOT NULL)
+);
+
+CREATE TABLE IF NOT EXISTS campanhas_comerciais (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  nome text NOT NULL,
+  descricao text,
+  ativa boolean NOT NULL DEFAULT true,
+  inicio_em timestamptz NOT NULL DEFAULT now(),
+  fim_em timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ck_campanhas_comerciais_periodo_valido
+    CHECK (fim_em IS NULL OR fim_em >= inicio_em)
+);
+
+CREATE TABLE IF NOT EXISTS politicas_preco (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  nome text NOT NULL,
+  sku text REFERENCES estoque(sku) ON DELETE CASCADE,
+  tipo_cliente text,
+  perfil_comercial_id uuid REFERENCES perfis_comerciais(id) ON DELETE SET NULL,
+  campanha_comercial_id uuid REFERENCES campanhas_comerciais(id) ON DELETE SET NULL,
+  quantidade_minima numeric(14,3) NOT NULL DEFAULT 0,
+  quantidade_maxima numeric(14,3),
+  desconto_percentual numeric(5,2) NOT NULL DEFAULT 0,
+  desconto_maximo_percentual numeric(5,2) NOT NULL DEFAULT 100,
+  multiplicador_preco numeric(8,4) NOT NULL DEFAULT 1.0000,
+  prioridade integer NOT NULL DEFAULT 100,
+  ativo boolean NOT NULL DEFAULT true,
+  inicio_vigencia timestamptz NOT NULL DEFAULT now(),
+  fim_vigencia timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ck_politicas_preco_tipo_cliente_valido CHECK (
+    tipo_cliente IS NULL
+    OR tipo_cliente IN ('varejo', 'atacado', 'frota', 'oficina', 'seguradora', 'distribuidor')
+  ),
+  CONSTRAINT ck_politicas_preco_faixa_qtd_valida
+    CHECK (quantidade_minima >= 0 AND (quantidade_maxima IS NULL OR quantidade_maxima >= quantidade_minima)),
+  CONSTRAINT ck_politicas_preco_desconto_valido
+    CHECK (
+      desconto_percentual >= 0
+      AND desconto_percentual <= 100
+      AND desconto_maximo_percentual >= 0
+      AND desconto_maximo_percentual <= 100
+      AND desconto_percentual <= desconto_maximo_percentual
+    ),
+  CONSTRAINT ck_politicas_preco_multiplicador_valido CHECK (multiplicador_preco > 0),
+  CONSTRAINT ck_politicas_preco_periodo_valido
+    CHECK (fim_vigencia IS NULL OR fim_vigencia >= inicio_vigencia)
 );
 
 CREATE TABLE IF NOT EXISTS regua_cobranca (
@@ -586,6 +668,10 @@ CREATE INDEX IF NOT EXISTS idx_status_log_entidade_evento ON status_log(entidade
 CREATE INDEX IF NOT EXISTS idx_conciliacoes_pix_txid ON conciliacoes_pix(pix_txid, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_conciliacoes_pix_status ON conciliacoes_pix(status_conciliacao, pago_em DESC);
 CREATE INDEX IF NOT EXISTS idx_auditoria_comercial_busca ON auditoria_comercial(entidade, entidade_id, data_evento DESC);
+CREATE INDEX IF NOT EXISTS idx_politicas_preco_lookup ON politicas_preco(ativo, prioridade, tipo_cliente, sku);
+CREATE INDEX IF NOT EXISTS idx_politicas_preco_vigencia ON politicas_preco(inicio_vigencia, fim_vigencia);
+CREATE INDEX IF NOT EXISTS idx_politicas_margem_lookup ON politicas_margem(ativo, vendedor_id, perfil_comercial_id, inicio_vigencia, fim_vigencia);
+CREATE INDEX IF NOT EXISTS idx_campanhas_comerciais_ativas ON campanhas_comerciais(ativa, inicio_em, fim_em);
 CREATE INDEX IF NOT EXISTS idx_regua_cobranca_status_agenda ON regua_cobranca(status, agendado_para);
 CREATE INDEX IF NOT EXISTS idx_pipeline_etapas_lookup ON pipeline_etapas(entidade, etapa, ativo);
 CREATE INDEX IF NOT EXISTS idx_leads_sla_monitoria ON leads(status, etapa_entrada_em, ultimo_retorno_em);
@@ -674,6 +760,167 @@ BEGIN
       INSERT INTO auditoria_comercial(entidade, entidade_id, campo, valor_anterior, valor_novo, alterado_por, detalhes)
       VALUES ('estoque', NEW.id, 'preco_unitario', OLD.preco_unitario::text, NEW.preco_unitario::text, v_usuario, jsonb_build_object('sku', NEW.sku, 'trigger_op', TG_OP));
     END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+
+
+CREATE OR REPLACE FUNCTION resolver_politica_preco(
+  p_sku text,
+  p_tipo_cliente text,
+  p_quantidade numeric,
+  p_campanha_comercial_id uuid DEFAULT NULL
+)
+RETURNS politicas_preco AS $$
+DECLARE
+  v_policy politicas_preco%ROWTYPE;
+BEGIN
+  SELECT pp.*
+    INTO v_policy
+  FROM politicas_preco pp
+  LEFT JOIN campanhas_comerciais cc
+    ON cc.id = pp.campanha_comercial_id
+  WHERE pp.ativo = true
+    AND (pp.sku IS NULL OR pp.sku = p_sku)
+    AND (pp.tipo_cliente IS NULL OR pp.tipo_cliente = p_tipo_cliente)
+    AND COALESCE(p_quantidade, 0) >= pp.quantidade_minima
+    AND (pp.quantidade_maxima IS NULL OR COALESCE(p_quantidade, 0) <= pp.quantidade_maxima)
+    AND now() >= pp.inicio_vigencia
+    AND (pp.fim_vigencia IS NULL OR now() <= pp.fim_vigencia)
+    AND (
+      pp.campanha_comercial_id IS NULL
+      OR (
+        pp.campanha_comercial_id = p_campanha_comercial_id
+        AND cc.ativa = true
+        AND now() >= cc.inicio_em
+        AND (cc.fim_em IS NULL OR now() <= cc.fim_em)
+      )
+    )
+  ORDER BY pp.prioridade ASC, pp.quantidade_minima DESC, pp.created_at DESC
+  LIMIT 1;
+
+  RETURN v_policy;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+CREATE OR REPLACE FUNCTION validar_precificacao_pedido()
+RETURNS trigger AS $$
+DECLARE
+  v_tipo_cliente text;
+  v_perfil_id uuid;
+  v_campanha_id uuid;
+  v_margem_minima numeric(5,2) := 0;
+  v_receita_bruta numeric(14,2) := 0;
+  v_desconto_total numeric(14,2) := 0;
+  v_preco_tabela_total numeric(14,2) := 0;
+  v_margem_apurada numeric(8,2) := 0;
+  v_item jsonb;
+  v_sku text;
+  v_qtd numeric;
+  v_preco_unit numeric(14,2);
+  v_desconto_item numeric(14,2);
+  v_preco_tabela numeric(14,2);
+  v_policy politicas_preco%ROWTYPE;
+BEGIN
+  SELECT l.tipo_cliente, pc.id
+    INTO v_tipo_cliente, v_perfil_id
+  FROM atendimentos a
+  JOIN leads l ON l.id = a.lead_id
+  LEFT JOIN perfis_comerciais pc
+    ON pc.nome = a.canal
+   AND pc.ativo = true
+  WHERE a.id = NEW.atendimento_id;
+
+  IF NEW.itens IS NULL OR jsonb_typeof(NEW.itens) <> 'array' THEN
+    RETURN NEW;
+  END IF;
+
+  IF NEW.status IN ('cancelado', 'fechado') THEN
+    RETURN NEW;
+  END IF;
+
+  IF NEW.pix_txid IS NOT NULL THEN
+    SELECT id INTO v_campanha_id
+    FROM campanhas_comerciais
+    WHERE nome = NEW.pix_txid
+      AND ativa = true
+    ORDER BY created_at DESC
+    LIMIT 1;
+  END IF;
+
+  SELECT pm.margem_minima_percentual
+    INTO v_margem_minima
+  FROM politicas_margem pm
+  WHERE pm.ativo = true
+    AND (pm.vendedor_id IS NULL OR pm.vendedor_id = (
+      SELECT a.vendedor_id FROM atendimentos a WHERE a.id = NEW.atendimento_id
+    ))
+    AND (pm.perfil_comercial_id IS NULL OR pm.perfil_comercial_id = v_perfil_id)
+    AND now() >= pm.inicio_vigencia
+    AND (pm.fim_vigencia IS NULL OR now() <= pm.fim_vigencia)
+  ORDER BY
+    CASE WHEN pm.vendedor_id IS NOT NULL THEN 0 ELSE 1 END,
+    CASE WHEN pm.perfil_comercial_id IS NOT NULL THEN 0 ELSE 1 END,
+    pm.created_at DESC
+  LIMIT 1;
+
+  v_margem_minima := COALESCE(v_margem_minima, 0);
+
+  FOR v_item IN SELECT * FROM jsonb_array_elements(NEW.itens)
+  LOOP
+    v_sku := COALESCE(v_item->>'sku', v_item->>'codigo', v_item->>'item');
+    v_qtd := COALESCE((v_item->>'quantidade')::numeric, (v_item->>'qtd')::numeric, 0);
+    v_preco_unit := COALESCE((v_item->>'preco_unitario')::numeric, (v_item->>'preco')::numeric, 0);
+    v_desconto_item := COALESCE((v_item->>'desconto')::numeric, (v_item->>'valor_desconto')::numeric, 0);
+
+    SELECT e.preco_unitario INTO v_preco_tabela
+    FROM estoque e
+    WHERE e.sku = v_sku;
+
+    v_preco_tabela := COALESCE(v_preco_tabela, v_preco_unit);
+    v_policy := resolver_politica_preco(v_sku, v_tipo_cliente, v_qtd, v_campanha_id);
+
+    IF v_policy.id IS NOT NULL THEN
+      IF v_desconto_item > round((COALESCE(v_qtd, 0) * COALESCE(v_preco_tabela, 0)) * (v_policy.desconto_maximo_percentual / 100.0), 2) THEN
+        RAISE EXCEPTION 'Desconto excede política comercial para SKU % (max: %%%)', v_sku, v_policy.desconto_maximo_percentual;
+      END IF;
+
+      INSERT INTO auditoria_comercial(entidade, entidade_id, campo, valor_anterior, valor_novo, alterado_por, detalhes)
+      VALUES (
+        'politica_preco',
+        NEW.id,
+        'regra_aplicada',
+        NULL,
+        v_policy.nome,
+        COALESCE(current_setting('app.user', true), 'system'),
+        jsonb_build_object('sku', v_sku, 'quantidade', v_qtd, 'tipo_cliente', v_tipo_cliente, 'politica_id', v_policy.id)
+      );
+    END IF;
+
+    v_preco_tabela_total := v_preco_tabela_total + (COALESCE(v_qtd, 0) * COALESCE(v_preco_tabela, 0));
+    v_receita_bruta := v_receita_bruta + (COALESCE(v_qtd, 0) * COALESCE(v_preco_unit, 0));
+    v_desconto_total := v_desconto_total + COALESCE(v_desconto_item, 0);
+  END LOOP;
+
+  IF v_preco_tabela_total > 0 THEN
+    v_margem_apurada := round((((v_receita_bruta - v_desconto_total) - v_preco_tabela_total) / v_preco_tabela_total) * 100.0, 2);
+  END IF;
+
+  IF v_margem_apurada < v_margem_minima THEN
+    INSERT INTO auditoria_comercial(entidade, entidade_id, campo, valor_anterior, valor_novo, alterado_por, detalhes)
+    VALUES (
+      'margem_minima',
+      NEW.id,
+      'reprovacao_margem',
+      v_margem_apurada::text,
+      v_margem_minima::text,
+      COALESCE(current_setting('app.user', true), 'system'),
+      jsonb_build_object('subtotal', NEW.subtotal, 'descontos', NEW.descontos, 'total', NEW.total)
+    );
+    RAISE EXCEPTION 'Margem mínima não atendida. Apurada: %%%, mínima exigida: %%%', v_margem_apurada, v_margem_minima;
   END IF;
 
   RETURN NEW;
@@ -1581,6 +1828,12 @@ BEFORE INSERT OR UPDATE ON pedidos
 FOR EACH ROW
 EXECUTE FUNCTION touch_stage_dates();
 
+DROP TRIGGER IF EXISTS trg_pedidos_validar_precificacao ON pedidos;
+CREATE TRIGGER trg_pedidos_validar_precificacao
+BEFORE INSERT OR UPDATE OF itens, subtotal, descontos, total, status ON pedidos
+FOR EACH ROW
+EXECUTE FUNCTION validar_precificacao_pedido();
+
 DROP TRIGGER IF EXISTS trg_vendedores_updated_at ON vendedores;
 CREATE TRIGGER trg_vendedores_updated_at
 BEFORE UPDATE ON vendedores
@@ -1650,6 +1903,30 @@ EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS trg_campanhas_retencao_execucoes_updated_at ON campanhas_retencao_execucoes;
 CREATE TRIGGER trg_campanhas_retencao_execucoes_updated_at
 BEFORE UPDATE ON campanhas_retencao_execucoes
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_perfis_comerciais_updated_at ON perfis_comerciais;
+CREATE TRIGGER trg_perfis_comerciais_updated_at
+BEFORE UPDATE ON perfis_comerciais
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_politicas_margem_updated_at ON politicas_margem;
+CREATE TRIGGER trg_politicas_margem_updated_at
+BEFORE UPDATE ON politicas_margem
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_campanhas_comerciais_updated_at ON campanhas_comerciais;
+CREATE TRIGGER trg_campanhas_comerciais_updated_at
+BEFORE UPDATE ON campanhas_comerciais
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_politicas_preco_updated_at ON politicas_preco;
+CREATE TRIGGER trg_politicas_preco_updated_at
+BEFORE UPDATE ON politicas_preco
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
@@ -1750,6 +2027,15 @@ ON CONFLICT (entidade, etapa) DO UPDATE
 SET probabilidade_padrao = EXCLUDED.probabilidade_padrao,
     sla_minutos = EXCLUDED.sla_minutos,
     alerta_gerente = EXCLUDED.alerta_gerente,
+    ativo = true,
+    updated_at = now();
+
+INSERT INTO perfis_comerciais (nome, descricao)
+VALUES
+  ('whatsapp', 'Perfil comercial padrão para atendimento via WhatsApp'),
+  ('inside_sales', 'Perfil comercial para equipe interna de televendas')
+ON CONFLICT (nome) DO UPDATE
+SET descricao = EXCLUDED.descricao,
     ativo = true,
     updated_at = now();
 
