@@ -14,6 +14,9 @@ DECLARE
   v_titulo_receber_id uuid;
   v_documento_fiscal_id uuid;
   v_fiscal_pendente integer;
+  v_veiculo_id uuid;
+  v_aplicacao_count integer;
+  v_aplicacao_por_chassi integer;
   v_txid text := 'e2e-txid-' || substring(md5(clock_timestamp()::text) from 1 for 12);
 BEGIN
   INSERT INTO estoque (sku, descricao, categoria, quantidade_disponivel, estoque_minimo, preco_unitario, ativo)
@@ -36,6 +39,59 @@ BEGIN
     SET prioridade = EXCLUDED.prioridade,
         ativo = true,
         updated_at = now();
+
+  INSERT INTO veiculos_catalogo (
+    marca,
+    modelo,
+    versao,
+    ano_inicio,
+    ano_fim,
+    motor,
+    codigo_motor,
+    combustivel,
+    chassi_inicio,
+    chassi_fim,
+    ativo
+  )
+  VALUES (
+    'Volkswagen',
+    'Gol',
+    '1.6 MSI',
+    2020,
+    2023,
+    '1.6',
+    'CWVA',
+    'flex',
+    '9BWAA45U0LT000001',
+    '9BWAA45U0PT999999',
+    true
+  )
+  RETURNING id INTO v_veiculo_id;
+
+  INSERT INTO estoque_aplicacoes (
+    sku,
+    veiculo_id,
+    tipo_aplicacao,
+    lado,
+    posicao,
+    codigo_oem,
+    observacao_tecnica,
+    requer_confirmacao_chassi,
+    prioridade,
+    ativo
+  )
+  VALUES (
+    'E2E-001',
+    v_veiculo_id,
+    'freio',
+    'dianteiro',
+    'eixo_1',
+    'VW-1J0698151',
+    'Aplicar em conjunto completo por eixo.',
+    true,
+    1,
+    true
+  );
 
   INSERT INTO leads (telefone, nome, itens_interesse, status)
   VALUES ('5511999999999', 'Lead E2E', '[{"sku":"E2E-001","qtd":2}]'::jsonb, 'lead_qualificado_bot')
@@ -228,6 +284,30 @@ BEGIN
 
   IF v_alerta_ruptura < 1 THEN
     RAISE EXCEPTION 'E2E CRM falhou: alerta de ruptura com impacto não retornou para SKU sem estoque';
+  END IF;
+
+  SELECT count(*)
+    INTO v_aplicacao_count
+  FROM buscar_aplicacoes_veiculares('Volkswagen', 'Gol', 2021, '1.6', NULL)
+  WHERE sku = 'E2E-001';
+
+  IF v_aplicacao_count < 1 THEN
+    RAISE EXCEPTION 'E2E CRM falhou: busca de aplicação veicular por marca/modelo/ano/motor não retornou SKU compatível';
+  END IF;
+
+  SELECT count(*)
+    INTO v_aplicacao_por_chassi
+  FROM buscar_aplicacoes_veiculares(
+    'Volkswagen',
+    'Gol',
+    2021,
+    'CWVA',
+    '9BWAA45U0MT123456'
+  )
+  WHERE sku = 'E2E-001';
+
+  IF v_aplicacao_por_chassi < 1 THEN
+    RAISE EXCEPTION 'E2E CRM falhou: busca de aplicação veicular por chassi/código motor não retornou SKU compatível';
   END IF;
 
   SELECT count(*)

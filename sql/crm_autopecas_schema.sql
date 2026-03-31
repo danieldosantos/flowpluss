@@ -181,6 +181,50 @@ CREATE TABLE IF NOT EXISTS estoque_equivalencias (
   CONSTRAINT uk_estoque_equivalencias UNIQUE (sku_origem, sku_equivalente)
 );
 
+CREATE TABLE IF NOT EXISTS veiculos_catalogo (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  marca text NOT NULL,
+  modelo text NOT NULL,
+  versao text,
+  ano_inicio integer NOT NULL,
+  ano_fim integer,
+  motor text,
+  codigo_motor text,
+  combustivel text,
+  chassi_inicio text,
+  chassi_fim text,
+  observacoes text,
+  ativo boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ck_veiculos_catalogo_ano_inicio_valido CHECK (ano_inicio BETWEEN 1950 AND 2100),
+  CONSTRAINT ck_veiculos_catalogo_ano_fim_valido CHECK (ano_fim IS NULL OR ano_fim BETWEEN 1950 AND 2100),
+  CONSTRAINT ck_veiculos_catalogo_faixa_anos_valida CHECK (ano_fim IS NULL OR ano_fim >= ano_inicio),
+  CONSTRAINT ck_veiculos_catalogo_chassi_faixa_valida CHECK (
+    chassi_inicio IS NULL
+    OR chassi_fim IS NULL
+    OR chassi_fim >= chassi_inicio
+  )
+);
+
+CREATE TABLE IF NOT EXISTS estoque_aplicacoes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  sku text NOT NULL REFERENCES estoque(sku) ON DELETE CASCADE,
+  veiculo_id uuid NOT NULL REFERENCES veiculos_catalogo(id) ON DELETE CASCADE,
+  tipo_aplicacao text,
+  lado text,
+  posicao text,
+  codigo_oem text,
+  observacao_tecnica text,
+  requer_confirmacao_chassi boolean NOT NULL DEFAULT false,
+  prioridade smallint NOT NULL DEFAULT 1,
+  ativo boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ck_estoque_aplicacoes_prioridade_valida CHECK (prioridade BETWEEN 1 AND 10),
+  CONSTRAINT uk_estoque_aplicacoes UNIQUE (sku, veiculo_id, tipo_aplicacao, lado, posicao, codigo_oem)
+);
+
 CREATE TABLE IF NOT EXISTS pedidos (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   atendimento_id uuid NOT NULL REFERENCES atendimentos(id),
@@ -532,6 +576,11 @@ CREATE INDEX IF NOT EXISTS idx_pedidos_status_created_at ON pedidos(status, crea
 CREATE INDEX IF NOT EXISTS idx_pedidos_pagamento ON pedidos(status, pago_em DESC);
 CREATE INDEX IF NOT EXISTS idx_estoque_qtd ON estoque(quantidade_disponivel);
 CREATE INDEX IF NOT EXISTS idx_estoque_equivalencias_origem ON estoque_equivalencias(sku_origem, ativo, prioridade);
+CREATE INDEX IF NOT EXISTS idx_veiculos_catalogo_lookup ON veiculos_catalogo(marca, modelo, ano_inicio, ano_fim, ativo);
+CREATE INDEX IF NOT EXISTS idx_veiculos_catalogo_motor ON veiculos_catalogo(modelo, motor, codigo_motor, ativo);
+CREATE INDEX IF NOT EXISTS idx_veiculos_catalogo_chassi ON veiculos_catalogo(chassi_inicio, chassi_fim) WHERE chassi_inicio IS NOT NULL OR chassi_fim IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_estoque_aplicacoes_sku ON estoque_aplicacoes(sku, ativo, prioridade);
+CREATE INDEX IF NOT EXISTS idx_estoque_aplicacoes_veiculo ON estoque_aplicacoes(veiculo_id, ativo, prioridade);
 CREATE INDEX IF NOT EXISTS idx_estoque_reservas_lookup ON estoque_reservas(pedido_id, status, sku);
 CREATE INDEX IF NOT EXISTS idx_status_log_entidade_evento ON status_log(entidade, entidade_id, data_evento DESC);
 CREATE INDEX IF NOT EXISTS idx_conciliacoes_pix_txid ON conciliacoes_pix(pix_txid, created_at DESC);
@@ -1064,6 +1113,95 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION buscar_aplicacoes_veiculares(
+  p_marca text,
+  p_modelo text,
+  p_ano integer,
+  p_motor text DEFAULT NULL,
+  p_chassi text DEFAULT NULL
+)
+RETURNS TABLE (
+  sku text,
+  descricao text,
+  categoria text,
+  marca text,
+  modelo text,
+  versao text,
+  ano_inicio integer,
+  ano_fim integer,
+  motor text,
+  codigo_motor text,
+  tipo_aplicacao text,
+  lado text,
+  posicao text,
+  codigo_oem text,
+  observacao_tecnica text,
+  requer_confirmacao_chassi boolean,
+  prioridade smallint
+) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    e.sku,
+    e.descricao,
+    e.categoria,
+    v.marca,
+    v.modelo,
+    v.versao,
+    v.ano_inicio,
+    v.ano_fim,
+    v.motor,
+    v.codigo_motor,
+    a.tipo_aplicacao,
+    a.lado,
+    a.posicao,
+    a.codigo_oem,
+    a.observacao_tecnica,
+    a.requer_confirmacao_chassi,
+    a.prioridade
+  FROM estoque_aplicacoes a
+  JOIN estoque e
+    ON e.sku = a.sku
+   AND e.ativo = true
+  JOIN veiculos_catalogo v
+    ON v.id = a.veiculo_id
+   AND v.ativo = true
+  WHERE a.ativo = true
+    AND lower(v.marca) = lower(trim(p_marca))
+    AND lower(v.modelo) = lower(trim(p_modelo))
+    AND p_ano BETWEEN v.ano_inicio AND COALESCE(v.ano_fim, v.ano_inicio)
+    AND (
+      NULLIF(trim(p_motor), '') IS NULL
+      OR NULLIF(trim(v.motor), '') IS NULL
+      OR lower(v.motor) = lower(trim(p_motor))
+      OR (NULLIF(trim(v.codigo_motor), '') IS NOT NULL AND lower(v.codigo_motor) = lower(trim(p_motor)))
+    )
+    AND (
+      NULLIF(trim(p_chassi), '') IS NULL
+      OR (
+        NULLIF(trim(v.chassi_inicio), '') IS NULL
+        AND NULLIF(trim(v.chassi_fim), '') IS NULL
+      )
+      OR (
+        NULLIF(trim(v.chassi_inicio), '') IS NOT NULL
+        AND NULLIF(trim(v.chassi_fim), '') IS NOT NULL
+        AND upper(trim(p_chassi)) BETWEEN upper(trim(v.chassi_inicio)) AND upper(trim(v.chassi_fim))
+      )
+      OR (
+        NULLIF(trim(v.chassi_inicio), '') IS NOT NULL
+        AND NULLIF(trim(v.chassi_fim), '') IS NULL
+        AND upper(trim(p_chassi)) >= upper(trim(v.chassi_inicio))
+      )
+      OR (
+        NULLIF(trim(v.chassi_inicio), '') IS NULL
+        AND NULLIF(trim(v.chassi_fim), '') IS NOT NULL
+        AND upper(trim(p_chassi)) <= upper(trim(v.chassi_fim))
+      )
+    )
+  ORDER BY a.prioridade ASC, e.sku;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
 CREATE OR REPLACE VIEW vw_estoque_disponibilidade AS
 SELECT
   e.sku,
@@ -1117,6 +1255,39 @@ LEFT JOIN base
   ON base.sku_origem = eq.sku_origem
 WHERE eq.ativo = true
   AND est_eq.ativo = true;
+
+CREATE OR REPLACE VIEW vw_catalogo_aplicacao_tecnica AS
+SELECT
+  a.id AS aplicacao_id,
+  a.sku,
+  e.descricao AS sku_descricao,
+  e.categoria AS sku_categoria,
+  v.id AS veiculo_id,
+  v.marca,
+  v.modelo,
+  v.versao,
+  v.ano_inicio,
+  v.ano_fim,
+  v.motor,
+  v.codigo_motor,
+  v.combustivel,
+  v.chassi_inicio,
+  v.chassi_fim,
+  a.tipo_aplicacao,
+  a.lado,
+  a.posicao,
+  a.codigo_oem,
+  a.observacao_tecnica,
+  a.requer_confirmacao_chassi,
+  a.prioridade,
+  a.ativo AS aplicacao_ativa,
+  v.ativo AS veiculo_ativo,
+  e.ativo AS sku_ativo
+FROM estoque_aplicacoes a
+JOIN estoque e
+  ON e.sku = a.sku
+JOIN veiculos_catalogo v
+  ON v.id = a.veiculo_id;
 
 CREATE OR REPLACE VIEW vw_curva_abc_giro_sku AS
 WITH vendas AS (
@@ -1431,6 +1602,18 @@ EXECUTE FUNCTION log_auditoria_comercial();
 DROP TRIGGER IF EXISTS trg_estoque_equivalencias_updated_at ON estoque_equivalencias;
 CREATE TRIGGER trg_estoque_equivalencias_updated_at
 BEFORE UPDATE ON estoque_equivalencias
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_veiculos_catalogo_updated_at ON veiculos_catalogo;
+CREATE TRIGGER trg_veiculos_catalogo_updated_at
+BEFORE UPDATE ON veiculos_catalogo
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_estoque_aplicacoes_updated_at ON estoque_aplicacoes;
+CREATE TRIGGER trg_estoque_aplicacoes_updated_at
+BEFORE UPDATE ON estoque_aplicacoes
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 

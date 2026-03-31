@@ -18,6 +18,7 @@ Este projeto agora inclui os artefatos necessários para implantar o blueprint c
 - [x] Publicar base para alertas/métricas via `status_log` e consultas SQL.
 - [x] Prioridade 1 de pós-venda e retenção: módulo de recompra, garantia, devolução/troca, recall e manutenção periódica por cliente/frota.
 - [x] Prioridade 3 de estoque: reserva automática ao montar proposta, cross-reference de equivalentes, curva ABC/giro por SKU e alerta de ruptura com impacto em vendas perdidas.
+- [x] Catálogo técnico de aplicação veicular: relacionamento por marca/modelo/ano/motor/chassi com compatibilidade por SKU.
 - [x] Prioridade 4 de financeiro/compliance: conciliação PIX automática com tolerância, régua de cobrança para inadimplência e trilha de auditoria expandida de preço/desconto/status.
 - [x] Prioridade 2 fiscal/ERP: NFe/NFCe com trilha de eventos fiscais, contas a receber/pagar, lançamentos contábeis e fila de integração assíncrona com ERP.
 
@@ -134,6 +135,11 @@ Este projeto agora inclui os artefatos necessários para implantar o blueprint c
   - `vw_sugestoes_equivalentes` (cross-reference para sugestão de item equivalente).
   - `vw_curva_abc_giro_sku` (classificação ABC + giro mensal estimado por SKU).
   - `vw_alerta_ruptura_estoque` (ruptura/risco com estimativa de receita perdida).
+- Catálogo e aplicação técnica de peças:
+  - `veiculos_catalogo` mantém granularidade técnica de aplicação (`marca/modelo/versão/ano/motor/código motor/chassi`).
+  - `estoque_aplicacoes` relaciona SKU às aplicações por veículo com metadados técnicos (`lado`, `posição`, `código_oem`, observações e prioridade).
+  - `buscar_aplicacoes_veiculares(...)` retorna peças compatíveis com filtros de marca, modelo, ano, motor e chassi.
+  - `vw_catalogo_aplicacao_tecnica` entrega visão consolidada SKU + aplicação para consultas operacionais.
 
 
 ## Fluxo único + menu principal (novo)
