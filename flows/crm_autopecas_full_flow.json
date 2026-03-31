@@ -1,0 +1,699 @@
+[
+  {
+    "id": "crm_tab_bot",
+    "type": "tab",
+    "label": "CRM Autopeças - Bot",
+    "disabled": false,
+    "info": "Triagem bot com coleta de dados mínimos e envio para fila humana."
+  },
+  {
+    "id": "crm_tab_humano",
+    "type": "tab",
+    "label": "CRM Autopeças - Humano/Vendas",
+    "disabled": false,
+    "info": "Roteamento para vendedor, proposta, pedido e confirmação de itens."
+  },
+  {
+    "id": "crm_tab_pix",
+    "type": "tab",
+    "label": "CRM Autopeças - PIX/Recibo",
+    "disabled": false,
+    "info": "Geração PIX, callback de pagamento, recibo e fechamento de venda."
+  },
+  {
+    "id": "crm_tab_dash",
+    "type": "tab",
+    "label": "CRM Autopeças - Dashboards",
+    "disabled": false,
+    "info": "KPIs operacionais, vendas, clientes, estoque e financeiro PIX."
+  },
+  {
+    "id": "crm_link_fila_humana",
+    "type": "link out",
+    "z": "crm_tab_bot",
+    "name": "Fila humana",
+    "mode": "link",
+    "links": [
+      "crm_link_in_humano"
+    ],
+    "x": 1160,
+    "y": 240,
+    "wires": []
+  },
+  {
+    "id": "crm_webhook_whatsapp",
+    "type": "http in",
+    "z": "crm_tab_bot",
+    "name": "Webhook Entrada WhatsApp",
+    "url": "/crm/autopecas/webhook",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 180,
+    "y": 100,
+    "wires": [
+      [
+        "crm_fn_validate_hmac"
+      ]
+    ]
+  },
+  {
+    "id": "crm_fn_validate_hmac",
+    "type": "function",
+    "z": "crm_tab_bot",
+    "name": "Valida Assinatura HMAC",
+    "func": "const crypto = require('crypto');\nconst headerSig = msg.req?.headers?.['x-webhook-signature'] || '';\nconst raw = typeof msg.payload === 'string' ? msg.payload : JSON.stringify(msg.payload || {});\nconst secret = env.get('WEBHOOK_HMAC_SECRET') || '';\nif (!secret) {\n  msg.statusCode = 500;\n  msg.payload = { ok: false, error: 'WEBHOOK_HMAC_SECRET ausente' };\n  return [null, msg];\n}\nconst expected = crypto.createHmac('sha256', secret).update(raw).digest('hex');\nif (headerSig !== expected) {\n  msg.statusCode = 401;\n  msg.payload = { ok: false, error: 'assinatura_invalida' };\n  return [null, msg];\n}\nreturn [msg, null];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "crypto",
+        "module": "crypto"
+      }
+    ],
+    "x": 430,
+    "y": 100,
+    "wires": [
+      [
+        "crm_fn_normaliza_msg"
+      ],
+      [
+        "crm_http_resp_bot"
+      ]
+    ]
+  },
+  {
+    "id": "crm_fn_normaliza_msg",
+    "type": "function",
+    "z": "crm_tab_bot",
+    "name": "Normaliza Mensagem + contexto",
+    "func": "const body = msg.payload || {};\nconst telefone = String(body.telefone || body.from || '').replace(/\\D/g, '');\nconst texto = String(body.mensagem || body.text || '').trim();\nconst conversa = flow.get('ctx:' + telefone) || {};\nmsg.crm = {\n  telefone,\n  texto,\n  nome: conversa.nome || body.nome || null,\n  empresa: conversa.empresa || body.empresa || null,\n  itens_interesse: conversa.itens_interesse || body.itens_interesse || null,\n  estado: conversa.estado || body.estado || null,\n  cidade: conversa.cidade || body.cidade || null\n};\nmsg.topic = 'SELECT * FROM leads WHERE telefone = $1 LIMIT 1';\nmsg.payload = [telefone];\nreturn msg;",
+    "outputs": 1,
+    "x": 710,
+    "y": 100,
+    "wires": [
+      [
+        "crm_pg_lead_by_phone"
+      ]
+    ]
+  },
+  {
+    "id": "crm_pg_lead_by_phone",
+    "type": "postgres",
+    "z": "crm_tab_bot",
+    "postgresdb": "crm_postgres_config",
+    "name": "Identifica lead existente",
+    "output": true,
+    "perrow": false,
+    "query": "",
+    "x": 1000,
+    "y": 100,
+    "wires": [
+      [
+        "crm_fn_valida_dados_minimos"
+      ]
+    ]
+  },
+  {
+    "id": "crm_fn_valida_dados_minimos",
+    "type": "function",
+    "z": "crm_tab_bot",
+    "name": "Valida dados mínimos",
+    "func": "const leadAtual = (msg.payload && msg.payload[0]) || {};\nconst crm = msg.crm || {};\nconst merged = {\n  telefone: crm.telefone,\n  nome: crm.nome || leadAtual.nome || null,\n  empresa: crm.empresa || leadAtual.empresa || null,\n  itens_interesse: crm.itens_interesse || leadAtual.itens_interesse || null,\n  estado: crm.estado || leadAtual.estado || null,\n  cidade: crm.cidade || leadAtual.cidade || null\n};\nconst completo = Boolean(merged.nome && merged.itens_interesse);\nconst status = completo ? 'lead_qualificado_bot' : 'dados_incompletos';\nflow.set('ctx:' + merged.telefone, merged);\nmsg.crm = merged;\nmsg.crm.status = status;\nmsg.topic = `INSERT INTO leads (telefone, nome, empresa, itens_interesse, estado, cidade, origem, status)\nVALUES ($1,$2,$3,$4::jsonb,$5,$6,'whatsapp',$7)\nON CONFLICT (telefone) DO UPDATE SET\nnome = EXCLUDED.nome,\nempresa = EXCLUDED.empresa,\nitens_interesse = EXCLUDED.itens_interesse,\nestado = EXCLUDED.estado,\ncidade = EXCLUDED.cidade,\nstatus = EXCLUDED.status,\nupdated_at = now()\nRETURNING *`;\nmsg.payload = [merged.telefone, merged.nome, merged.empresa, JSON.stringify(merged.itens_interesse || []), merged.estado, merged.cidade, status];\nreturn [msg, completo ? null : msg];",
+    "outputs": 2,
+    "x": 1250,
+    "y": 100,
+    "wires": [
+      [
+        "crm_pg_upsert_lead"
+      ],
+      [
+        "crm_template_dados_incompletos"
+      ]
+    ]
+  },
+  {
+    "id": "crm_pg_upsert_lead",
+    "type": "postgres",
+    "z": "crm_tab_bot",
+    "postgresdb": "crm_postgres_config",
+    "name": "Salva/Atualiza lead",
+    "output": true,
+    "perrow": false,
+    "query": "",
+    "x": 1510,
+    "y": 80,
+    "wires": [
+      [
+        "crm_template_transferencia",
+        "crm_link_fila_humana"
+      ]
+    ]
+  },
+  {
+    "id": "crm_template_transferencia",
+    "type": "template",
+    "z": "crm_tab_bot",
+    "name": "Mensagem transferência",
+    "field": "payload",
+    "fieldType": "msg",
+    "format": "handlebars",
+    "syntax": "mustache",
+    "template": "Seu atendimento foi encaminhado para um vendedor especialista. Seguimos por aqui em instantes.",
+    "output": "str",
+    "x": 1770,
+    "y": 60,
+    "wires": [
+      [
+        "crm_http_resp_bot"
+      ]
+    ]
+  },
+  {
+    "id": "crm_template_dados_incompletos",
+    "type": "template",
+    "z": "crm_tab_bot",
+    "name": "Mensagem dados incompletos",
+    "field": "payload",
+    "fieldType": "msg",
+    "format": "handlebars",
+    "syntax": "mustache",
+    "template": "Para continuar, preciso de pelo menos seu nome e o item desejado.",
+    "output": "str",
+    "x": 1520,
+    "y": 140,
+    "wires": [
+      [
+        "crm_http_resp_bot"
+      ]
+    ]
+  },
+  {
+    "id": "crm_http_resp_bot",
+    "type": "http response",
+    "z": "crm_tab_bot",
+    "name": "HTTP Response Bot",
+    "statusCode": "",
+    "headers": {},
+    "x": 2020,
+    "y": 100,
+    "wires": []
+  },
+  {
+    "id": "crm_link_in_humano",
+    "type": "link in",
+    "z": "crm_tab_humano",
+    "name": "Recebe Lead Qualificado",
+    "links": [
+      "crm_link_fila_humana"
+    ],
+    "x": 180,
+    "y": 100,
+    "wires": [
+      [
+        "crm_fn_round_robin"
+      ]
+    ]
+  },
+  {
+    "id": "crm_fn_round_robin",
+    "type": "function",
+    "z": "crm_tab_humano",
+    "name": "Distribui vendedor ativo",
+    "func": "msg.topic = 'SELECT id, nome FROM vendedores WHERE ativo = true ORDER BY created_at';\nmsg.payload = [];\nreturn msg;",
+    "outputs": 1,
+    "x": 460,
+    "y": 100,
+    "wires": [
+      [
+        "crm_pg_vendedores_ativos"
+      ]
+    ]
+  },
+  {
+    "id": "crm_pg_vendedores_ativos",
+    "type": "postgres",
+    "z": "crm_tab_humano",
+    "postgresdb": "crm_postgres_config",
+    "name": "Busca vendedores ativos",
+    "output": true,
+    "perrow": false,
+    "query": "",
+    "x": 720,
+    "y": 100,
+    "wires": [
+      [
+        "crm_fn_abre_atendimento"
+      ]
+    ]
+  },
+  {
+    "id": "crm_fn_abre_atendimento",
+    "type": "function",
+    "z": "crm_tab_humano",
+    "name": "Abre atendimento + status",
+    "func": "const rows = msg.payload || [];\nif (!rows.length) {\n  node.error('Nenhum vendedor ativo', msg);\n  return null;\n}\nlet idx = flow.get('vendedor_rr_idx') || 0;\nconst vendedor = rows[idx % rows.length];\nflow.set('vendedor_rr_idx', (idx + 1) % rows.length);\nconst leadId = (msg.payload_lead && msg.payload_lead.id) || (msg.crm_lead && msg.crm_lead.id) || (msg.crm && msg.crm.id) || null;\nmsg.crm_vendedor = vendedor;\nmsg.topic = `INSERT INTO atendimentos (lead_id, vendedor_id, status, canal, observacoes) VALUES ($1,$2,'transferido_vendedor','whatsapp',$3) RETURNING *`;\nmsg.payload = [leadId, vendedor.id, 'Auto-roteamento via round-robin'];\nreturn msg;",
+    "outputs": 1,
+    "x": 980,
+    "y": 100,
+    "wires": [
+      [
+        "crm_pg_cria_atendimento"
+      ]
+    ]
+  },
+  {
+    "id": "crm_pg_cria_atendimento",
+    "type": "postgres",
+    "z": "crm_tab_humano",
+    "postgresdb": "crm_postgres_config",
+    "name": "Cria atendimento",
+    "output": true,
+    "perrow": false,
+    "query": "",
+    "x": 1230,
+    "y": 100,
+    "wires": [
+      [
+        "crm_pg_consulta_estoque"
+      ]
+    ]
+  },
+  {
+    "id": "crm_pg_consulta_estoque",
+    "type": "postgres",
+    "z": "crm_tab_humano",
+    "postgresdb": "crm_postgres_config",
+    "name": "Consulta estoque em tempo real",
+    "output": true,
+    "perrow": false,
+    "query": "SELECT sku, descricao, quantidade_disponivel, preco_unitario FROM estoque WHERE ativo = true ORDER BY quantidade_disponivel ASC LIMIT 20",
+    "x": 1510,
+    "y": 100,
+    "wires": [
+      [
+        "crm_template_proposta"
+      ]
+    ]
+  },
+  {
+    "id": "crm_template_proposta",
+    "type": "template",
+    "z": "crm_tab_humano",
+    "name": "Monta proposta",
+    "field": "payload",
+    "fieldType": "msg",
+    "format": "handlebars",
+    "syntax": "mustache",
+    "template": "Perfeito! Confirme por favor os itens, quantidades e valores. Após sua confirmação, envio o PIX para pagamento.",
+    "output": "str",
+    "x": 1740,
+    "y": 100,
+    "wires": [
+      [
+        "crm_link_confirmacao_itens"
+      ]
+    ]
+  },
+  {
+    "id": "crm_link_confirmacao_itens",
+    "type": "link out",
+    "z": "crm_tab_humano",
+    "name": "Trigger confirmação de itens",
+    "mode": "link",
+    "links": [
+      "crm_link_in_pix"
+    ],
+    "x": 1990,
+    "y": 100,
+    "wires": []
+  },
+  {
+    "id": "crm_link_in_pix",
+    "type": "link in",
+    "z": "crm_tab_pix",
+    "name": "Confirmação itens recebida",
+    "links": [
+      "crm_link_confirmacao_itens"
+    ],
+    "x": 190,
+    "y": 80,
+    "wires": [
+      [
+        "crm_fn_valida_total"
+      ]
+    ]
+  },
+  {
+    "id": "crm_fn_valida_total",
+    "type": "function",
+    "z": "crm_tab_pix",
+    "name": "Valida total pedido",
+    "func": "const total = Number(msg.total || msg.pedido?.total || 0);\nif (!(total > 0)) {\n  node.error('Total inválido para gerar PIX', msg);\n  return null;\n}\nmsg.pix = {\n  chave: '02445780012',\n  valor: total.toFixed(2),\n  descricao: `Pedido ${msg.pedido?.id || ''}`\n};\nreturn msg;",
+    "outputs": 1,
+    "x": 440,
+    "y": 80,
+    "wires": [
+      [
+        "crm_http_pix"
+      ]
+    ]
+  },
+  {
+    "id": "crm_http_pix",
+    "type": "http request",
+    "z": "crm_tab_pix",
+    "name": "Gerar PIX (gateway)",
+    "method": "POST",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "http://webhook-gateway:3000/pix/cobranca",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "authType": "",
+    "senderr": true,
+    "headers": [
+      {
+        "keyType": "Content-Type",
+        "keyValue": "application/json",
+        "valueType": "other",
+        "valueValue": "application/json"
+      }
+    ],
+    "x": 700,
+    "y": 80,
+    "wires": [
+      [
+        "crm_fn_persist_pix"
+      ]
+    ]
+  },
+  {
+    "id": "crm_fn_persist_pix",
+    "type": "function",
+    "z": "crm_tab_pix",
+    "name": "Persistir PIX + status",
+    "func": "const txid = msg.payload?.txid || msg.payload?.id;\nconst copia = msg.payload?.pix_copia_cola || msg.payload?.copiaecola;\nconst pedidoId = msg.pedido?.id;\nmsg.topic = `UPDATE pedidos SET pix_txid=$1, pix_copia_cola=$2, status='aguardando_pagamento', updated_at=now() WHERE id=$3 RETURNING *`;\nmsg.payload = [txid, copia, pedidoId];\nmsg.pix = { txid, copia };\nreturn msg;",
+    "outputs": 1,
+    "x": 980,
+    "y": 80,
+    "wires": [
+      [
+        "crm_pg_update_pedido_pix"
+      ]
+    ]
+  },
+  {
+    "id": "crm_pg_update_pedido_pix",
+    "type": "postgres",
+    "z": "crm_tab_pix",
+    "postgresdb": "crm_postgres_config",
+    "name": "Atualiza pedido aguardando_pagamento",
+    "output": true,
+    "perrow": false,
+    "query": "",
+    "x": 1280,
+    "y": 80,
+    "wires": [
+      [
+        "crm_template_msg_pix",
+        "crm_template_recibo_provisorio"
+      ]
+    ]
+  },
+  {
+    "id": "crm_template_msg_pix",
+    "type": "template",
+    "z": "crm_tab_pix",
+    "name": "Mensagem PIX gerado",
+    "field": "payload",
+    "fieldType": "msg",
+    "format": "handlebars",
+    "syntax": "mustache",
+    "template": "Pedido confirmado ✅\nTotal: R$ {{pedido.total}}\nPIX (copia e cola): {{pix.copia}}\nAssim que o pagamento for confirmado, envio o recibo para download aqui no chat.",
+    "output": "str",
+    "x": 1590,
+    "y": 60,
+    "wires": [
+      [
+        "crm_debug_pix"
+      ]
+    ]
+  },
+  {
+    "id": "crm_template_recibo_provisorio",
+    "type": "template",
+    "z": "crm_tab_pix",
+    "name": "Recibo provisório HTML",
+    "field": "recibo_html",
+    "fieldType": "msg",
+    "format": "html",
+    "syntax": "mustache",
+    "template": "<h1>Recibo Provisório</h1><p>Pedido: {{pedido.id}}</p><p>Total: R$ {{pedido.total}}</p>",
+    "output": "str",
+    "x": 1600,
+    "y": 110,
+    "wires": [
+      [
+        "crm_debug_pix"
+      ]
+    ]
+  },
+  {
+    "id": "crm_webhook_pix_callback",
+    "type": "http in",
+    "z": "crm_tab_pix",
+    "name": "Webhook confirmação PIX",
+    "url": "/crm/autopecas/pix/callback",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 190,
+    "y": 200,
+    "wires": [
+      [
+        "crm_fn_valida_callback"
+      ]
+    ]
+  },
+  {
+    "id": "crm_fn_valida_callback",
+    "type": "function",
+    "z": "crm_tab_pix",
+    "name": "Valida TXID e valor",
+    "func": "const txid = msg.payload?.txid;\nconst valor = Number(msg.payload?.valor || 0);\nif (!txid || !(valor > 0)) {\n  msg.statusCode = 400;\n  msg.payload = { ok: false, error: 'callback_invalido' };\n  return [null, msg];\n}\nmsg.topic = `UPDATE pedidos SET status='pago', pago_em=now(), updated_at=now() WHERE pix_txid=$1 AND total=$2 RETURNING id`;\nmsg.payload = [txid, valor];\nreturn [msg, null];",
+    "outputs": 2,
+    "x": 440,
+    "y": 200,
+    "wires": [
+      [
+        "crm_pg_set_pago"
+      ],
+      [
+        "crm_http_resp_pix"
+      ]
+    ]
+  },
+  {
+    "id": "crm_pg_set_pago",
+    "type": "postgres",
+    "z": "crm_tab_pix",
+    "postgresdb": "crm_postgres_config",
+    "name": "Atualiza pedido pago",
+    "output": true,
+    "perrow": false,
+    "query": "",
+    "x": 720,
+    "y": 200,
+    "wires": [
+      [
+        "crm_template_pagamento_confirmado"
+      ]
+    ]
+  },
+  {
+    "id": "crm_template_pagamento_confirmado",
+    "type": "template",
+    "z": "crm_tab_pix",
+    "name": "Mensagem pagamento confirmado",
+    "field": "payload",
+    "fieldType": "msg",
+    "format": "handlebars",
+    "syntax": "mustache",
+    "template": "Pagamento confirmado ✅\nSeu recibo já está disponível para download: {{recibo_url}}\nObrigado!",
+    "output": "str",
+    "x": 1010,
+    "y": 200,
+    "wires": [
+      [
+        "crm_http_resp_pix"
+      ]
+    ]
+  },
+  {
+    "id": "crm_http_resp_pix",
+    "type": "http response",
+    "z": "crm_tab_pix",
+    "name": "HTTP Response PIX",
+    "statusCode": "",
+    "headers": {},
+    "x": 1270,
+    "y": 200,
+    "wires": []
+  },
+  {
+    "id": "crm_debug_pix",
+    "type": "debug",
+    "z": "crm_tab_pix",
+    "name": "Debug PIX",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "x": 1850,
+    "y": 80,
+    "wires": []
+  },
+  {
+    "id": "crm_ui_tab_operacao",
+    "type": "ui_tab",
+    "name": "Operação",
+    "icon": "dashboard",
+    "disabled": false,
+    "hidden": false
+  },
+  {
+    "id": "crm_ui_group_operacao",
+    "type": "ui_group",
+    "name": "KPIs Operacionais",
+    "tab": "crm_ui_tab_operacao",
+    "order": 1,
+    "disp": true,
+    "width": "12",
+    "collapse": false
+  },
+  {
+    "id": "crm_inject_dashboard",
+    "type": "inject",
+    "z": "crm_tab_dash",
+    "name": "Refresh KPIs",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "30",
+    "once": true,
+    "onceDelay": "5",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 170,
+    "y": 100,
+    "wires": [
+      [
+        "crm_pg_kpis_operacao"
+      ]
+    ]
+  },
+  {
+    "id": "crm_pg_kpis_operacao",
+    "type": "postgres",
+    "z": "crm_tab_dash",
+    "postgresdb": "crm_postgres_config",
+    "name": "Query KPIs Operação",
+    "output": true,
+    "perrow": false,
+    "query": "SELECT COUNT(*) FILTER (WHERE created_at::date = current_date) AS atendimentos_hoje, COUNT(*) FILTER (WHERE status = 'em_atendimento_humano') AS em_atendimento_humano, COUNT(*) FILTER (WHERE status = 'aguardando_pagamento') AS aguardando_pagamento FROM atendimentos",
+    "x": 430,
+    "y": 100,
+    "wires": [
+      [
+        "crm_fn_kpis_to_ui"
+      ]
+    ]
+  },
+  {
+    "id": "crm_fn_kpis_to_ui",
+    "type": "function",
+    "z": "crm_tab_dash",
+    "name": "Map KPIs para dashboard",
+    "func": "const row = (msg.payload && msg.payload[0]) || {};\nreturn [\n  { payload: Number(row.atendimentos_hoje || 0) },\n  { payload: Number(row.em_atendimento_humano || 0) },\n  { payload: Number(row.aguardando_pagamento || 0) }\n];",
+    "outputs": 3,
+    "x": 700,
+    "y": 100,
+    "wires": [
+      [
+        "crm_ui_txt_atendimentos_hoje"
+      ],
+      [
+        "crm_ui_txt_em_humano"
+      ],
+      [
+        "crm_ui_txt_aguardando_pag"
+      ]
+    ]
+  },
+  {
+    "id": "crm_ui_txt_atendimentos_hoje",
+    "type": "ui_text",
+    "z": "crm_tab_dash",
+    "group": "crm_ui_group_operacao",
+    "order": 1,
+    "width": 4,
+    "height": 1,
+    "name": "Atendimentos Hoje",
+    "label": "Atendimentos hoje",
+    "format": "{{msg.payload}}",
+    "layout": "row-spread",
+    "x": 990,
+    "y": 60,
+    "wires": []
+  },
+  {
+    "id": "crm_ui_txt_em_humano",
+    "type": "ui_text",
+    "z": "crm_tab_dash",
+    "group": "crm_ui_group_operacao",
+    "order": 2,
+    "width": 4,
+    "height": 1,
+    "name": "Em atendimento humano",
+    "label": "Em atendimento humano",
+    "format": "{{msg.payload}}",
+    "layout": "row-spread",
+    "x": 1000,
+    "y": 100,
+    "wires": []
+  },
+  {
+    "id": "crm_ui_txt_aguardando_pag",
+    "type": "ui_text",
+    "z": "crm_tab_dash",
+    "group": "crm_ui_group_operacao",
+    "order": 3,
+    "width": 4,
+    "height": 1,
+    "name": "Aguardando pagamento",
+    "label": "Aguardando pagamento",
+    "format": "{{msg.payload}}",
+    "layout": "row-spread",
+    "x": 1000,
+    "y": 140,
+    "wires": []
+  },
+  {
+    "id": "crm_postgres_config",
+    "type": "postgresdb",
+    "hostname": "postgres",
+    "port": "5432",
+    "db": "flowpluss",
+    "ssl": false,
+    "name": "PostgreSQL CRM"
+  }
+]
