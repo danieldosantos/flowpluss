@@ -652,6 +652,80 @@ CREATE TABLE IF NOT EXISTS campanhas_retencao_execucoes (
   CONSTRAINT uk_campanha_lead_execucao UNIQUE (campanha_id, lead_id)
 );
 
+CREATE TABLE IF NOT EXISTS lead_canais_contato (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  lead_id uuid NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  canal text NOT NULL,
+  identificador text NOT NULL,
+  principal boolean NOT NULL DEFAULT false,
+  opt_in_marketing boolean NOT NULL DEFAULT true,
+  ativo boolean NOT NULL DEFAULT true,
+  ultima_interacao_em timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ck_lead_canais_canal_valido CHECK (canal IN ('whatsapp', 'telefone', 'email', 'instagram', 'facebook', 'telegram', 'site_chat', 'sms')),
+  CONSTRAINT uk_lead_canais_identificador UNIQUE (canal, identificador)
+);
+
+CREATE TABLE IF NOT EXISTS segmentos_marketing (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  nome text NOT NULL UNIQUE,
+  descricao text,
+  criterio_sql text NOT NULL,
+  ativo boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS campanhas_marketing (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  nome text NOT NULL,
+  objetivo text NOT NULL,
+  segmento_id uuid REFERENCES segmentos_marketing(id) ON DELETE SET NULL,
+  canal text NOT NULL,
+  template_mensagem text NOT NULL,
+  prioridade smallint NOT NULL DEFAULT 3,
+  ativa boolean NOT NULL DEFAULT true,
+  inicio_em timestamptz NOT NULL DEFAULT now(),
+  fim_em timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ck_campanhas_marketing_canal_valido CHECK (canal IN ('whatsapp', 'telefone', 'email', 'instagram', 'facebook', 'telegram', 'site_chat', 'sms')),
+  CONSTRAINT ck_campanhas_marketing_prioridade_valida CHECK (prioridade BETWEEN 1 AND 5),
+  CONSTRAINT ck_campanhas_marketing_periodo_valido CHECK (fim_em IS NULL OR fim_em >= inicio_em)
+);
+
+CREATE TABLE IF NOT EXISTS campanhas_marketing_execucoes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  campanha_id uuid NOT NULL REFERENCES campanhas_marketing(id) ON DELETE CASCADE,
+  lead_id uuid NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  lead_canal_id uuid REFERENCES lead_canais_contato(id) ON DELETE SET NULL,
+  status text NOT NULL DEFAULT 'pendente',
+  enviado_em timestamptz,
+  resposta_em timestamptz,
+  converteu_em_pedido boolean NOT NULL DEFAULT false,
+  detalhes jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ck_campanhas_mkt_exec_status_valido CHECK (status IN ('pendente', 'enviado', 'respondido', 'erro', 'cancelado')),
+  CONSTRAINT uk_campanha_marketing_lead UNIQUE (campanha_id, lead_id)
+);
+
+CREATE TABLE IF NOT EXISTS automacoes_reativacao (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  nome text NOT NULL UNIQUE,
+  dias_inatividade integer NOT NULL DEFAULT 60,
+  campanha_id uuid REFERENCES campanhas_marketing(id) ON DELETE SET NULL,
+  canal_preferencial text NOT NULL DEFAULT 'whatsapp',
+  limite_diario integer NOT NULL DEFAULT 200,
+  ativa boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ck_automacoes_reativacao_dias_validos CHECK (dias_inatividade >= 15),
+  CONSTRAINT ck_automacoes_reativacao_limite_valido CHECK (limite_diario > 0),
+  CONSTRAINT ck_automacoes_reativacao_canal_valido CHECK (canal_preferencial IN ('whatsapp', 'telefone', 'email', 'instagram', 'facebook', 'telegram', 'site_chat', 'sms'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_leads_status_created_at ON leads(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_atendimentos_status_created_at ON atendimentos(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_pedidos_status_created_at ON pedidos(status, created_at DESC);
@@ -683,6 +757,12 @@ CREATE INDEX IF NOT EXISTS idx_pos_venda_casos_relacoes ON pos_venda_casos(lead_
 CREATE INDEX IF NOT EXISTS idx_manutencoes_agendadas_status ON manutencoes_agendadas(status, agendado_para);
 CREATE INDEX IF NOT EXISTS idx_campanhas_retencao_ativas ON campanhas_retencao(ativa, inicio_em, fim_em);
 CREATE INDEX IF NOT EXISTS idx_campanhas_exec_lookup ON campanhas_retencao_execucoes(campanha_id, status, enviado_em DESC);
+CREATE INDEX IF NOT EXISTS idx_lead_canais_lookup ON lead_canais_contato(lead_id, canal, ativo, principal);
+CREATE INDEX IF NOT EXISTS idx_lead_canais_optin ON lead_canais_contato(canal, opt_in_marketing, ativo);
+CREATE INDEX IF NOT EXISTS idx_segmentos_marketing_ativos ON segmentos_marketing(ativo, nome);
+CREATE INDEX IF NOT EXISTS idx_campanhas_marketing_ativas ON campanhas_marketing(ativa, canal, inicio_em, fim_em);
+CREATE INDEX IF NOT EXISTS idx_campanhas_marketing_exec ON campanhas_marketing_execucoes(campanha_id, status, enviado_em DESC);
+CREATE INDEX IF NOT EXISTS idx_automacoes_reativacao_ativas ON automacoes_reativacao(ativa, canal_preferencial, dias_inatividade);
 CREATE INDEX IF NOT EXISTS idx_fiscal_documentos_status_tipo ON fiscal_documentos(status, tipo, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_fiscal_documentos_pedido ON fiscal_documentos(pedido_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_fiscal_eventos_documento ON fiscal_eventos(documento_id, created_at DESC);
@@ -1798,6 +1878,112 @@ LEFT JOIN LATERAL (
   LIMIT 1
 ) ei ON true;
 
+CREATE OR REPLACE VIEW vw_carteira_inativa AS
+SELECT
+  l.id AS lead_id,
+  l.nome,
+  l.telefone,
+  l.origem,
+  l.status,
+  GREATEST(
+    COALESCE(l.ultimo_retorno_em, l.updated_at, l.created_at),
+    COALESCE(a.ultimo_atendimento_em, l.created_at),
+    COALESCE(p.ultimo_pedido_em, l.created_at)
+  ) AS ultima_interacao_em,
+  EXTRACT(
+    day FROM now() - GREATEST(
+      COALESCE(l.ultimo_retorno_em, l.updated_at, l.created_at),
+      COALESCE(a.ultimo_atendimento_em, l.created_at),
+      COALESCE(p.ultimo_pedido_em, l.created_at)
+    )
+  )::integer AS dias_sem_interacao,
+  COALESCE(canais.canais_ativos, 0) AS canais_ativos,
+  COALESCE(canais.canal_preferencial, 'whatsapp') AS canal_preferencial
+FROM leads l
+LEFT JOIN LATERAL (
+  SELECT MAX(a.updated_at) AS ultimo_atendimento_em
+  FROM atendimentos a
+  WHERE a.lead_id = l.id
+) a ON true
+LEFT JOIN LATERAL (
+  SELECT MAX(p.updated_at) AS ultimo_pedido_em
+  FROM pedidos p
+  JOIN atendimentos at ON at.id = p.atendimento_id
+  WHERE at.lead_id = l.id
+) p ON true
+LEFT JOIN LATERAL (
+  SELECT
+    COUNT(*) FILTER (WHERE c.ativo) AS canais_ativos,
+    (ARRAY_AGG(c.canal ORDER BY c.principal DESC, c.updated_at DESC))[1] AS canal_preferencial
+  FROM lead_canais_contato c
+  WHERE c.lead_id = l.id
+    AND c.ativo = true
+    AND c.opt_in_marketing = true
+) canais ON true;
+
+CREATE OR REPLACE FUNCTION enfileirar_reativacao_carteira_inativa(
+  p_dias_sem_interacao integer DEFAULT 60,
+  p_canal text DEFAULT 'whatsapp',
+  p_limite integer DEFAULT 200
+)
+RETURNS integer AS $$
+DECLARE
+  v_campanha_id uuid;
+  v_qtd integer := 0;
+BEGIN
+  SELECT id
+  INTO v_campanha_id
+  FROM campanhas_marketing
+  WHERE ativa = true
+    AND canal = p_canal
+    AND objetivo ILIKE '%reativa%'
+    AND (inicio_em IS NULL OR inicio_em <= now())
+    AND (fim_em IS NULL OR fim_em >= now())
+  ORDER BY prioridade ASC, created_at DESC
+  LIMIT 1;
+
+  IF v_campanha_id IS NULL THEN
+    RETURN 0;
+  END IF;
+
+  WITH elegiveis AS (
+    SELECT ci.lead_id
+    FROM vw_carteira_inativa ci
+    WHERE ci.dias_sem_interacao >= p_dias_sem_interacao
+      AND ci.canal_preferencial = p_canal
+    ORDER BY ci.dias_sem_interacao DESC, ci.lead_id
+    LIMIT GREATEST(p_limite, 1)
+  )
+  INSERT INTO campanhas_marketing_execucoes (campanha_id, lead_id, lead_canal_id, status, detalhes)
+  SELECT
+    v_campanha_id,
+    e.lead_id,
+    c.id,
+    'pendente',
+    jsonb_build_object(
+      'origem', 'automacao_reativacao',
+      'dias_sem_interacao', ci.dias_sem_interacao,
+      'canal_preferencial', ci.canal_preferencial
+    )
+  FROM elegiveis e
+  JOIN vw_carteira_inativa ci ON ci.lead_id = e.lead_id
+  LEFT JOIN LATERAL (
+    SELECT c2.id
+    FROM lead_canais_contato c2
+    WHERE c2.lead_id = e.lead_id
+      AND c2.canal = p_canal
+      AND c2.ativo = true
+      AND c2.opt_in_marketing = true
+    ORDER BY c2.principal DESC, c2.updated_at DESC
+    LIMIT 1
+  ) c ON true
+  ON CONFLICT (campanha_id, lead_id) DO NOTHING;
+
+  GET DIAGNOSTICS v_qtd = ROW_COUNT;
+  RETURN v_qtd;
+END;
+$$ LANGUAGE plpgsql;
+
 DROP TRIGGER IF EXISTS trg_leads_updated_at ON leads;
 CREATE TRIGGER trg_leads_updated_at
 BEFORE UPDATE ON leads
@@ -1903,6 +2089,36 @@ EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS trg_campanhas_retencao_execucoes_updated_at ON campanhas_retencao_execucoes;
 CREATE TRIGGER trg_campanhas_retencao_execucoes_updated_at
 BEFORE UPDATE ON campanhas_retencao_execucoes
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_lead_canais_contato_updated_at ON lead_canais_contato;
+CREATE TRIGGER trg_lead_canais_contato_updated_at
+BEFORE UPDATE ON lead_canais_contato
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_segmentos_marketing_updated_at ON segmentos_marketing;
+CREATE TRIGGER trg_segmentos_marketing_updated_at
+BEFORE UPDATE ON segmentos_marketing
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_campanhas_marketing_updated_at ON campanhas_marketing;
+CREATE TRIGGER trg_campanhas_marketing_updated_at
+BEFORE UPDATE ON campanhas_marketing
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_campanhas_marketing_execucoes_updated_at ON campanhas_marketing_execucoes;
+CREATE TRIGGER trg_campanhas_marketing_execucoes_updated_at
+BEFORE UPDATE ON campanhas_marketing_execucoes
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_automacoes_reativacao_updated_at ON automacoes_reativacao;
+CREATE TRIGGER trg_automacoes_reativacao_updated_at
+BEFORE UPDATE ON automacoes_reativacao
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 

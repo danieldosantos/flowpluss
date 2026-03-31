@@ -14,6 +14,7 @@ Implementar um CRM de atendimento para autopeças com:
 - Dashboards operacionais e gerenciais.
 - Visão integrada de estoque no atendimento.
 - Pós-venda e retenção com recompra, garantia, troca/devolução, recall e manutenção periódica por cliente/frota.
+- Estratégia omnichannel com campanhas segmentadas e automações de reativação de carteira inativa.
 
 ---
 
@@ -140,6 +141,16 @@ Implementar um CRM de atendimento para autopeças com:
 
 - Campanhas para recompra/reativação com janela de vigência.
 - Execuções por cliente com status de envio, resposta e conversão em pedido.
+
+## 2.11 Omnichannel e marketing de base
+
+- `lead_canais_contato`: múltiplos canais por cliente (WhatsApp, telefone, email, Instagram, Facebook, Telegram, site chat e SMS) com consentimento (`opt_in_marketing`) e canal principal.
+- `segmentos_marketing`: definição de segmentos por critério SQL para públicos-alvo.
+- `campanhas_marketing`: campanhas por canal e prioridade, vinculáveis a segmento.
+- `campanhas_marketing_execucoes`: fila e histórico de disparo por lead com conversão.
+- `automacoes_reativacao`: políticas ativas por dias de inatividade com limite diário.
+- `vw_carteira_inativa`: visão operacional para priorizar quem está sem interação.
+- `enfileirar_reativacao_carteira_inativa(...)`: função para preencher a fila de campanhas de reativação.
 
 ---
 
