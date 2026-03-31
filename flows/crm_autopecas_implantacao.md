@@ -100,3 +100,25 @@ Este projeto agora inclui os artefatos necessários para implantar o blueprint c
 - A chave PIX oficial (`02445780012`) é fixada no schema de vendedores e usada no fluxo de cobrança.
 - Pedido fechado exige pagamento (`ck_pedido_fechado_precisa_pago`).
 - Mudanças de status são auditadas automaticamente por trigger (`log_status_change`).
+
+
+## Fluxo único + menu principal (novo)
+
+O arquivo `flows/crm_autopecas_full_flow.json` foi consolidado em **um único flow tab** no editor Node-RED:
+
+- `CRM Autopeças - Fluxo Unificado`
+
+Além disso, no Dashboard (`/ui`) existe uma aba de navegação **Menu CRM** com atalhos para as demais telas.
+
+### URLs das telas
+
+Considerando Node-RED em `http://127.0.0.1:1880`:
+
+- Home do dashboard: `http://127.0.0.1:1880/ui`
+- Menu principal: `http://127.0.0.1:1880/ui/#!/0`
+- Operação: `http://127.0.0.1:1880/ui/#!/1`
+- Vendas: `http://127.0.0.1:1880/ui/#!/2`
+- Financeiro PIX: `http://127.0.0.1:1880/ui/#!/3`
+- Clientes & Estoque: `http://127.0.0.1:1880/ui/#!/4`
+
+> Observação: o índice (`#!/0`, `#!/1`...) pode variar se você já tiver outras abas no Dashboard. Se variar, abra `/ui` e navegue pelo menu lateral.

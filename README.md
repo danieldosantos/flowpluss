@@ -150,6 +150,19 @@ docker compose exec node-red sh -lc 'tail -n 20 /data/logs/node-red-audit.jsonl'
 
 - Node-RED: http://127.0.0.1:1880
 - Evolution API: http://127.0.0.1:8080
+- Dashboard Node-RED: http://127.0.0.1:1880/ui
+
+### 6.1) URLs das telas do CRM Autopeças (menu principal + telas)
+
+Após importar `flows/crm_autopecas_full_flow.json`, o CRM fica em **um único flow tab** e o Dashboard ganha um **Menu CRM** com links para as telas:
+
+- Menu principal: `http://127.0.0.1:1880/ui/#!/0`
+- Operação: `http://127.0.0.1:1880/ui/#!/1`
+- Vendas: `http://127.0.0.1:1880/ui/#!/2`
+- Financeiro PIX: `http://127.0.0.1:1880/ui/#!/3`
+- Clientes & Estoque: `http://127.0.0.1:1880/ui/#!/4`
+
+> Se você já possui outras abas de dashboard, a numeração pode mudar. Nesse caso, entre em `http://127.0.0.1:1880/ui` e use o menu lateral.
 
 ---
 
