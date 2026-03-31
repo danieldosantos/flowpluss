@@ -19,10 +19,24 @@ Este projeto agora inclui os artefatos necessários para implantar o blueprint c
 
 ## Como aplicar
 
+> Exemplo abaixo considerando sua stack já em execução (containers `node-red` e `evolution-postgres` saudáveis).
+
 1. Aplicar schema:
 
    ```bash
    psql -h 127.0.0.1 -U flowpluss -d flowpluss -f sql/crm_autopecas_schema.sql
+   ```
+
+   Se você não tiver `psql` instalado no host, rode direto no container PostgreSQL:
+
+   ```bash
+   docker exec -i evolution-postgres psql -U flowpluss -d flowpluss < sql/crm_autopecas_schema.sql
+   ```
+
+   Validar se as tabelas foram criadas:
+
+   ```bash
+   docker exec -it evolution-postgres psql -U flowpluss -d flowpluss -c "\dt"
    ```
 
 2. Importar flow no Node-RED:
@@ -30,11 +44,56 @@ Este projeto agora inclui os artefatos necessários para implantar o blueprint c
    - Ajustar nós `postgres`/`http request` conforme credenciais do ambiente.
    - Deploy.
 
+   Checklist rápido de configuração dos nós:
+   - Nó `postgres`: host `evolution-postgres` (se Node-RED estiver na mesma rede Docker) ou `127.0.0.1` com porta publicada.
+   - Banco: `flowpluss`; usuário: `flowpluss`; senha: definida no seu ambiente.
+   - Nós `http request` de cobrança/callback: URL base do gateway PIX do seu ambiente.
+   - Salvar credenciais no Node-RED e fazer **Deploy Full**.
+
 3. Validar ponta a ponta:
    - Simular entrada de webhook bot.
    - Confirmar criação de lead e roteamento humano.
    - Confirmar geração de PIX e atualização de status.
    - Simular callback de pagamento.
+
+   Exemplo mínimo para validar webhook (ajuste endpoint/token do seu flow):
+
+   ```bash
+   curl -X POST "http://127.0.0.1:1880/webhook/bot" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "telefone": "5511999999999",
+       "mensagem": "Preciso de pastilha de freio para Corolla 2020"
+     }'
+   ```
+
+   Consultas SQL úteis para conferir processamento:
+
+   ```sql
+   -- Leads recentes
+   SELECT id, telefone, status, created_at
+   FROM leads
+   ORDER BY created_at DESC
+   LIMIT 10;
+
+   -- Pedidos recentes e status de pagamento
+   SELECT id, lead_id, status, valor_total, pago, updated_at
+   FROM pedidos
+   ORDER BY updated_at DESC
+   LIMIT 10;
+
+   -- Auditoria de mudanças de status
+   SELECT entidade, entidade_id, status_anterior, status_novo, changed_at
+   FROM status_log
+   ORDER BY changed_at DESC
+   LIMIT 20;
+   ```
+
+4. Se algo falhar, diagnóstico rápido:
+   - `docker logs --tail 200 node-red`
+   - `docker logs --tail 200 evolution-postgres`
+   - Conferir se o flow está usando os mesmos nomes de host da rede Docker.
+   - Reimportar o flow e fazer novo deploy.
 
 ## Observações de negócio implementadas
 
