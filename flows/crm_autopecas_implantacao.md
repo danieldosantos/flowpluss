@@ -22,6 +22,7 @@ Este projeto agora inclui os artefatos necessários para implantar o blueprint c
 - [x] Prioridade 4 de financeiro/compliance: conciliação PIX automática com tolerância, régua de cobrança para inadimplência e trilha de auditoria expandida de preço/desconto/status.
 - [x] Prioridade 2 fiscal/ERP: NFe/NFCe com trilha de eventos fiscais, contas a receber/pagar, lançamentos contábeis e fila de integração assíncrona com ERP.
 - [x] Prioridade 5 omnichannel e marketing de base: visão integrada de canais, campanhas segmentadas e automações de reativação da carteira inativa.
+- [x] Prioridade 6 gestão comercial: metas por vendedor, comissionamento, produtividade mensal e ranking por conversão/margem.
 
 ## Como aplicar
 
@@ -122,6 +123,11 @@ Este projeto agora inclui os artefatos necessários para implantar o blueprint c
   - `pedidos.subtotal`/`pedidos.total`
   - `estoque.preco_unitario`
 - Pipeline comercial profissional em `pipeline_etapas` com probabilidade padrão por estágio e SLA por etapa.
+- Gestão de time comercial com:
+  - `metas_vendedores` para metas mensais por vendedor (receita, pedidos, atendimentos, conversão e margem), incluindo percentual base de comissão e bônus de superação.
+  - `comissoes_vendedores` para lançamentos e pagamento de comissão por pedido/competência com trilha de status (`pendente` → `aprovada` → `paga`).
+  - `vw_desempenho_vendedores` para produtividade mensal consolidada (atendimentos, pedidos convertidos, ticket, conversão, margem média e atingimento de metas).
+  - `vw_ranking_vendedores` com ranking mensal por **conversão**, **margem** e **faturamento** para gestão de performance.
 - Omnichannel e marketing de base implementados com:
   - `lead_canais_contato` para consolidar WhatsApp, telefone, email, redes sociais, site chat e SMS por cliente com opt-in.
   - `segmentos_marketing`, `campanhas_marketing` e `campanhas_marketing_execucoes` para segmentação e disparos por canal.
