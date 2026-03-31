@@ -52,6 +52,28 @@ BEGIN
       'comprou_concorrente'
     );
   END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'pos_venda_tipo') THEN
+    CREATE TYPE pos_venda_tipo AS ENUM (
+      'garantia',
+      'devolucao_troca',
+      'recall',
+      'manutencao',
+      'recompra'
+    );
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'pos_venda_status') THEN
+    CREATE TYPE pos_venda_status AS ENUM (
+      'aberto',
+      'em_analise',
+      'aprovado',
+      'rejeitado',
+      'em_execucao',
+      'concluido',
+      'cancelado'
+    );
+  END IF;
 END$$;
 
 CREATE TABLE IF NOT EXISTS leads (
@@ -254,6 +276,100 @@ CREATE TABLE IF NOT EXISTS pipeline_etapas (
   CONSTRAINT ck_pipeline_sla_positivo CHECK (sla_minutos > 0)
 );
 
+CREATE TABLE IF NOT EXISTS ativos_cliente (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  lead_id uuid NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  descricao_ativo text NOT NULL,
+  placa text,
+  chassi text,
+  modelo text,
+  ano_modelo integer,
+  quilometragem_atual integer,
+  periodicidade_manutencao_dias integer NOT NULL DEFAULT 180,
+  ultima_manutencao_em timestamptz,
+  proxima_manutencao_em timestamptz,
+  ativo boolean NOT NULL DEFAULT true,
+  observacoes text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ck_ativos_cliente_periodicidade_positiva CHECK (periodicidade_manutencao_dias > 0),
+  CONSTRAINT ck_ativos_cliente_ano_valido CHECK (ano_modelo IS NULL OR ano_modelo BETWEEN 1950 AND 2100),
+  CONSTRAINT ck_ativos_cliente_km_nao_negativa CHECK (quilometragem_atual IS NULL OR quilometragem_atual >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS pos_venda_casos (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  lead_id uuid NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  atendimento_id uuid REFERENCES atendimentos(id) ON DELETE SET NULL,
+  pedido_id uuid REFERENCES pedidos(id) ON DELETE SET NULL,
+  ativo_cliente_id uuid REFERENCES ativos_cliente(id) ON DELETE SET NULL,
+  tipo pos_venda_tipo NOT NULL,
+  status pos_venda_status NOT NULL DEFAULT 'aberto',
+  motivo text,
+  descricao text NOT NULL,
+  prioridade smallint NOT NULL DEFAULT 3,
+  data_solicitacao timestamptz NOT NULL DEFAULT now(),
+  prazo_sla_em timestamptz,
+  concluido_em timestamptz,
+  custo_estimado numeric(14,2),
+  custo_real numeric(14,2),
+  resolucao text,
+  responsavel text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ck_pos_venda_prioridade_valida CHECK (prioridade BETWEEN 1 AND 5),
+  CONSTRAINT ck_pos_venda_custos_nao_negativos CHECK (
+    (custo_estimado IS NULL OR custo_estimado >= 0)
+    AND (custo_real IS NULL OR custo_real >= 0)
+  )
+);
+
+CREATE TABLE IF NOT EXISTS manutencoes_agendadas (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  ativo_cliente_id uuid NOT NULL REFERENCES ativos_cliente(id) ON DELETE CASCADE,
+  pedido_id uuid REFERENCES pedidos(id) ON DELETE SET NULL,
+  pos_venda_caso_id uuid REFERENCES pos_venda_casos(id) ON DELETE SET NULL,
+  tipo_servico text NOT NULL DEFAULT 'manutencao_periodica',
+  agendado_para timestamptz NOT NULL,
+  executado_em timestamptz,
+  status pos_venda_status NOT NULL DEFAULT 'aberto',
+  canal_notificacao text NOT NULL DEFAULT 'whatsapp',
+  observacoes text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS campanhas_retencao (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  nome text NOT NULL,
+  objetivo text NOT NULL,
+  canal text NOT NULL DEFAULT 'whatsapp',
+  criterio_sql text,
+  template_mensagem text NOT NULL,
+  ativa boolean NOT NULL DEFAULT true,
+  inicio_em timestamptz NOT NULL DEFAULT now(),
+  fim_em timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ck_campanhas_periodo_valido CHECK (fim_em IS NULL OR fim_em >= inicio_em)
+);
+
+CREATE TABLE IF NOT EXISTS campanhas_retencao_execucoes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  campanha_id uuid NOT NULL REFERENCES campanhas_retencao(id) ON DELETE CASCADE,
+  lead_id uuid NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  pedido_id uuid REFERENCES pedidos(id) ON DELETE SET NULL,
+  status text NOT NULL DEFAULT 'pendente',
+  enviado_em timestamptz,
+  resposta_em timestamptz,
+  converteu_em_pedido boolean NOT NULL DEFAULT false,
+  detalhes jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ck_campanhas_exec_status_valido CHECK (status IN ('pendente', 'enviado', 'respondido', 'erro', 'cancelado')),
+  CONSTRAINT uk_campanha_lead_execucao UNIQUE (campanha_id, lead_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_leads_status_created_at ON leads(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_atendimentos_status_created_at ON atendimentos(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_pedidos_status_created_at ON pedidos(status, created_at DESC);
@@ -270,6 +386,12 @@ CREATE INDEX IF NOT EXISTS idx_pipeline_etapas_lookup ON pipeline_etapas(entidad
 CREATE INDEX IF NOT EXISTS idx_leads_sla_monitoria ON leads(status, etapa_entrada_em, ultimo_retorno_em);
 CREATE INDEX IF NOT EXISTS idx_pedidos_sla_monitoria ON pedidos(status, etapa_entrada_em, ultimo_retorno_em);
 CREATE INDEX IF NOT EXISTS idx_atendimentos_sla_monitoria ON atendimentos(status, etapa_entrada_em, ultimo_retorno_em);
+CREATE INDEX IF NOT EXISTS idx_ativos_cliente_lead ON ativos_cliente(lead_id, ativo, proxima_manutencao_em);
+CREATE INDEX IF NOT EXISTS idx_pos_venda_casos_lookup ON pos_venda_casos(status, tipo, data_solicitacao DESC);
+CREATE INDEX IF NOT EXISTS idx_pos_venda_casos_relacoes ON pos_venda_casos(lead_id, pedido_id, atendimento_id);
+CREATE INDEX IF NOT EXISTS idx_manutencoes_agendadas_status ON manutencoes_agendadas(status, agendado_para);
+CREATE INDEX IF NOT EXISTS idx_campanhas_retencao_ativas ON campanhas_retencao(ativa, inicio_em, fim_em);
+CREATE INDEX IF NOT EXISTS idx_campanhas_exec_lookup ON campanhas_retencao_execucoes(campanha_id, status, enviado_em DESC);
 
 CREATE OR REPLACE FUNCTION set_updated_at()
 RETURNS trigger AS $$
@@ -585,6 +707,55 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION gerar_manutencao_periodica(
+  p_ativo_cliente_id uuid,
+  p_origem_pedido_id uuid DEFAULT NULL,
+  p_base timestamptz DEFAULT now()
+)
+RETURNS uuid AS $$
+DECLARE
+  v_ativo ativos_cliente%ROWTYPE;
+  v_agendamento_id uuid;
+  v_data_base timestamptz;
+BEGIN
+  SELECT *
+    INTO v_ativo
+  FROM ativos_cliente
+  WHERE id = p_ativo_cliente_id
+    AND ativo = true;
+
+  IF v_ativo.id IS NULL THEN
+    RAISE EXCEPTION 'Ativo % inexistente ou inativo', p_ativo_cliente_id;
+  END IF;
+
+  v_data_base := COALESCE(v_ativo.ultima_manutencao_em, p_base, now());
+
+  INSERT INTO manutencoes_agendadas (
+    ativo_cliente_id, pedido_id, tipo_servico, agendado_para, status, canal_notificacao
+  )
+  VALUES (
+    v_ativo.id,
+    p_origem_pedido_id,
+    'manutencao_periodica',
+    v_data_base + make_interval(days => v_ativo.periodicidade_manutencao_dias),
+    'aberto',
+    'whatsapp'
+  )
+  RETURNING id INTO v_agendamento_id;
+
+  UPDATE ativos_cliente
+  SET proxima_manutencao_em = (
+        SELECT agendado_para
+        FROM manutencoes_agendadas
+        WHERE id = v_agendamento_id
+      ),
+      updated_at = now()
+  WHERE id = v_ativo.id;
+
+  RETURN v_agendamento_id;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE OR REPLACE VIEW vw_estoque_disponibilidade AS
 SELECT
   e.sku,
@@ -775,6 +946,77 @@ LEFT JOIN ult_cobranca uc
   ON uc.pedido_id = p.id
 WHERE p.status IN ('aguardando_pagamento', 'pago', 'fechado');
 
+CREATE OR REPLACE VIEW vw_pos_venda_operacao AS
+SELECT
+  pvc.id AS caso_id,
+  pvc.tipo,
+  pvc.status,
+  pvc.prioridade,
+  pvc.lead_id,
+  l.nome AS cliente_nome,
+  l.telefone AS cliente_telefone,
+  pvc.pedido_id,
+  pvc.atendimento_id,
+  pvc.data_solicitacao,
+  pvc.prazo_sla_em,
+  pvc.concluido_em,
+  EXTRACT(EPOCH FROM (now() - pvc.data_solicitacao)) / 3600.0 AS horas_em_aberto,
+  CASE
+    WHEN pvc.status IN ('concluido', 'cancelado', 'rejeitado') THEN 'encerrado'
+    WHEN pvc.prazo_sla_em IS NOT NULL AND pvc.prazo_sla_em < now() THEN 'sla_estourado'
+    ELSE 'dentro_sla'
+  END AS indicador_sla
+FROM pos_venda_casos pvc
+JOIN leads l
+  ON l.id = pvc.lead_id;
+
+CREATE OR REPLACE VIEW vw_retencao_clientes AS
+WITH pedidos_cliente AS (
+  SELECT
+    a.lead_id,
+    COUNT(*) FILTER (WHERE p.status IN ('pago', 'fechado'))::integer AS total_pedidos_pago_fechado,
+    COALESCE(SUM(CASE WHEN p.status IN ('pago', 'fechado') THEN p.total ELSE 0 END), 0)::numeric(14,2) AS receita_total,
+    MAX(p.pago_em) AS ultimo_pagamento_em
+  FROM pedidos p
+  JOIN atendimentos a
+    ON a.id = p.atendimento_id
+  GROUP BY a.lead_id
+),
+retencao AS (
+  SELECT
+    pc.lead_id,
+    pc.total_pedidos_pago_fechado,
+    pc.receita_total,
+    pc.ultimo_pagamento_em,
+    COUNT(*) FILTER (
+      WHERE p.status IN ('pago', 'fechado')
+        AND p.pago_em >= now() - interval '365 days'
+    )::integer AS pedidos_ultimos_365d
+  FROM pedidos_cliente pc
+  LEFT JOIN atendimentos a
+    ON a.lead_id = pc.lead_id
+  LEFT JOIN pedidos p
+    ON p.atendimento_id = a.id
+  GROUP BY pc.lead_id, pc.total_pedidos_pago_fechado, pc.receita_total, pc.ultimo_pagamento_em
+)
+SELECT
+  l.id AS lead_id,
+  l.nome,
+  l.telefone,
+  r.total_pedidos_pago_fechado,
+  r.pedidos_ultimos_365d,
+  r.receita_total,
+  r.ultimo_pagamento_em,
+  CASE
+    WHEN r.pedidos_ultimos_365d >= 3 THEN 'alta_recorrencia'
+    WHEN r.pedidos_ultimos_365d >= 1 THEN 'recorrente'
+    WHEN r.total_pedidos_pago_fechado >= 1 THEN 'reativacao'
+    ELSE 'sem_historico'
+  END AS segmento_retencao
+FROM leads l
+LEFT JOIN retencao r
+  ON r.lead_id = l.id;
+
 DROP TRIGGER IF EXISTS trg_leads_updated_at ON leads;
 CREATE TRIGGER trg_leads_updated_at
 BEFORE UPDATE ON leads
@@ -832,6 +1074,36 @@ EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS trg_estoque_reservas_updated_at ON estoque_reservas;
 CREATE TRIGGER trg_estoque_reservas_updated_at
 BEFORE UPDATE ON estoque_reservas
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_ativos_cliente_updated_at ON ativos_cliente;
+CREATE TRIGGER trg_ativos_cliente_updated_at
+BEFORE UPDATE ON ativos_cliente
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_pos_venda_casos_updated_at ON pos_venda_casos;
+CREATE TRIGGER trg_pos_venda_casos_updated_at
+BEFORE UPDATE ON pos_venda_casos
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_manutencoes_agendadas_updated_at ON manutencoes_agendadas;
+CREATE TRIGGER trg_manutencoes_agendadas_updated_at
+BEFORE UPDATE ON manutencoes_agendadas
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_campanhas_retencao_updated_at ON campanhas_retencao;
+CREATE TRIGGER trg_campanhas_retencao_updated_at
+BEFORE UPDATE ON campanhas_retencao
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_campanhas_retencao_execucoes_updated_at ON campanhas_retencao_execucoes;
+CREATE TRIGGER trg_campanhas_retencao_execucoes_updated_at
+BEFORE UPDATE ON campanhas_retencao_execucoes
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
