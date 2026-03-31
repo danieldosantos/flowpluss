@@ -31,6 +31,22 @@ Esse arquivo já está ajustado para este projeto (Docker service `evolution-api
 - `EVOLUTION_INSTANCE`
 - `BOT_NUMBER`
 
+
+## 1.2) CRM Autopeças (bot + humano + PIX + dashboard)
+
+Também foi adicionado um pacote completo de implantação do CRM Autopeças:
+
+- Flow Node-RED completo: `flows/crm_autopecas_full_flow.json`
+- Blueprint funcional: `flows/crm_autopecas_dashboard_blueprint.md`
+- Guia de implantação: `flows/crm_autopecas_implantacao.md`
+- Schema SQL: `sql/crm_autopecas_schema.sql`
+
+Fluxo recomendado:
+1. Aplicar o SQL no PostgreSQL.
+2. Importar o flow completo no Node-RED.
+3. Ajustar credenciais de nós Postgres e gateway PIX.
+4. Executar testes E2E de webhook, proposta, PIX, pagamento e fechamento.
+
 ## 2) Pré-requisitos (obrigatório)
 
 Antes de qualquer comando, confirme:
