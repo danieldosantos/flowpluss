@@ -5,6 +5,7 @@ const port = Number(process.env.PORT || '3000');
 const forwardHost = process.env.FORWARD_HOST || 'node-red';
 const forwardPort = Number(process.env.FORWARD_PORT || '1880');
 const forwardPath = process.env.FORWARD_PATH || '/evolution/webhook';
+const pixCallbackPath = process.env.PIX_CALLBACK_PATH || '/crm/autopecas/pix/callback';
 const signingSecret = process.env.WEBHOOK_HMAC_SECRET || '';
 const legacyAcceptedTokens = [
   process.env.WEBHOOK_SECRET || '',
@@ -30,11 +31,9 @@ function canonicalize(value) {
   if (value === null || typeof value !== 'object') {
     return JSON.stringify(value);
   }
-
   if (Array.isArray(value)) {
     return '[' + value.map(canonicalize).join(',') + ']';
   }
-
   const keys = Object.keys(value).sort();
   return '{' + keys.map((key) => JSON.stringify(key) + ':' + canonicalize(value[key])).join(',') + '}';
 }
@@ -43,13 +42,21 @@ function digestPayload(payload) {
   return crypto.createHash('sha256').update(canonicalize(payload), 'utf8').digest('hex');
 }
 
+function signGatewayPayload(payload, timestamp) {
+  const bodyDigest = digestPayload(payload);
+  const signature = crypto
+    .createHmac('sha256', signingSecret)
+    .update(`${timestamp}.${bodyDigest}`, 'utf8')
+    .digest('hex');
+  return { bodyDigest, signature };
+}
+
 function safeEqual(left, right) {
   const leftBuffer = Buffer.from(String(left || ''), 'utf8');
   const rightBuffer = Buffer.from(String(right || ''), 'utf8');
   if (leftBuffer.length !== rightBuffer.length) {
     return false;
   }
-
   return crypto.timingSafeEqual(leftBuffer, rightBuffer);
 }
 
@@ -62,7 +69,6 @@ function readBearerToken(authorizationHeader) {
   if (!value) {
     return '';
   }
-
   const match = /^Bearer\s+(.+)$/i.exec(value);
   return match ? String(match[1] || '').trim() : '';
 }
@@ -72,12 +78,10 @@ function readToken(req, url) {
   if (headerToken) {
     return headerToken;
   }
-
   const bearerToken = readBearerToken(req.headers.authorization);
   if (bearerToken) {
     return bearerToken;
   }
-
   const queryToken = String(url.searchParams.get('token') || '').trim();
   if (queryToken) {
     const now = Date.now();
@@ -86,7 +90,6 @@ function readToken(req, url) {
       console.warn('[webhook-gateway] query-string token detected; prefer x-webhook-token or Authorization: Bearer token');
     }
   }
-
   return queryToken;
 }
 
@@ -95,11 +98,102 @@ function respondJson(res, statusCode, payload) {
   res.end(JSON.stringify(payload));
 }
 
+function readJsonBody(req, res, callback) {
+  let rawBody = '';
+  req.setEncoding('utf8');
+  req.on('data', (chunk) => {
+    rawBody += chunk;
+    if (rawBody.length > 1024 * 1024) {
+      req.destroy(new Error('payload_too_large'));
+    }
+  });
+  req.on('error', () => {
+    if (!res.headersSent) {
+      respondJson(res, 413, { ok: false, error: 'payload_error' });
+    }
+  });
+  req.on('end', () => {
+    try {
+      callback(rawBody ? JSON.parse(rawBody) : {}, rawBody);
+    } catch (_error) {
+      respondJson(res, 400, { ok: false, error: 'invalid_json' });
+    }
+  });
+}
+
+function forwardJson({ payload, path, res, source }) {
+  const timestamp = String(Date.now());
+  const body = JSON.stringify(payload || {});
+  const { bodyDigest, signature } = signGatewayPayload(payload || {}, timestamp);
+
+  const proxyReq = http.request(
+    {
+      host: forwardHost,
+      port: forwardPort,
+      path,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+        'x-flowpluss-source': source,
+        'x-flowpluss-timestamp': timestamp,
+        'x-flowpluss-body-sha256': bodyDigest,
+        'x-flowpluss-signature': signature
+      }
+    },
+    (proxyRes) => {
+      const responseChunks = [];
+      proxyRes.on('data', (chunk) => responseChunks.push(chunk));
+      proxyRes.on('end', () => {
+        const responseBody = Buffer.concat(responseChunks);
+        res.writeHead(proxyRes.statusCode || 502, {
+          'Content-Type': proxyRes.headers['content-type'] || 'application/json'
+        });
+        res.end(responseBody);
+      });
+    }
+  );
+
+  proxyReq.on('error', () => {
+    respondJson(res, 502, { ok: false, error: 'upstream_unavailable' });
+  });
+
+  proxyReq.write(body);
+  proxyReq.end();
+}
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
   if (req.method === 'GET' && url.pathname === '/healthz') {
     respondJson(res, 200, { ok: true });
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/pix/cobranca') {
+    readJsonBody(req, res, (parsedBody) => {
+      const valor = Number(parsedBody?.valor || 0);
+      if (!(valor > 0)) {
+        respondJson(res, 400, { ok: false, error: 'valor_invalido' });
+        return;
+      }
+      const txid = 'tx' + crypto.randomBytes(8).toString('hex');
+      const valorFormatado = valor.toFixed(2);
+      respondJson(res, 201, {
+        ok: true,
+        txid,
+        valor: valorFormatado,
+        pix_copia_cola: `00020126360014BR.GOV.BCB.PIX011402445780012520400005303986540${valorFormatado.replace('.', '')}5802BR5913FLOWPLUSS CRM6009SAO PAULO62070503***6304ABCD`,
+        status: 'aguardando_pagamento'
+      });
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/pix/callback') {
+    readJsonBody(req, res, (parsedBody) => {
+      forwardJson({ payload: parsedBody, path: pixCallbackPath, res, source: 'pix_callback' });
+    });
     return;
   }
 
@@ -114,70 +208,8 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  let rawBody = '';
-  req.setEncoding('utf8');
-  req.on('data', (chunk) => {
-    rawBody += chunk;
-    if (rawBody.length > 1024 * 1024) {
-      req.destroy(new Error('payload_too_large'));
-    }
-  });
-
-  req.on('error', () => {
-    if (!res.headersSent) {
-      respondJson(res, 413, { ok: false, error: 'payload_error' });
-    }
-  });
-
-  req.on('end', () => {
-    let parsedBody = {};
-    try {
-      parsedBody = rawBody ? JSON.parse(rawBody) : {};
-    } catch (error) {
-      respondJson(res, 400, { ok: false, error: 'invalid_json' });
-      return;
-    }
-
-    const timestamp = String(Date.now());
-    const bodyDigest = digestPayload(parsedBody);
-    const signature = crypto
-      .createHmac('sha256', signingSecret)
-      .update(`${timestamp}.${bodyDigest}`, 'utf8')
-      .digest('hex');
-
-    const proxyReq = http.request(
-      {
-        host: forwardHost,
-        port: forwardPort,
-        path: forwardPath,
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(rawBody),
-          'x-flowpluss-timestamp': timestamp,
-          'x-flowpluss-body-sha256': bodyDigest,
-          'x-flowpluss-signature': signature
-        }
-      },
-      (proxyRes) => {
-        const responseChunks = [];
-        proxyRes.on('data', (chunk) => responseChunks.push(chunk));
-        proxyRes.on('end', () => {
-          const responseBody = Buffer.concat(responseChunks);
-          res.writeHead(proxyRes.statusCode || 502, {
-            'Content-Type': proxyRes.headers['content-type'] || 'application/json'
-          });
-          res.end(responseBody);
-        });
-      }
-    );
-
-    proxyReq.on('error', () => {
-      respondJson(res, 502, { ok: false, error: 'upstream_unavailable' });
-    });
-
-    proxyReq.write(rawBody);
-    proxyReq.end();
+  readJsonBody(req, res, (parsedBody) => {
+    forwardJson({ payload: parsedBody, path: forwardPath, res, source: 'evolution_webhook' });
   });
 });
 

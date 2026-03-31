@@ -47,6 +47,12 @@ Fluxo recomendado:
 3. Ajustar credenciais de nós Postgres e gateway PIX.
 4. Executar testes E2E de webhook, proposta, PIX, pagamento e fechamento.
 
+Teste obrigatório para liberar time comercial:
+
+```bash
+./tests/run_e2e_lead_to_fechamento.sh
+```
+
 ## 2) Pré-requisitos (obrigatório)
 
 Antes de qualquer comando, confirme:
