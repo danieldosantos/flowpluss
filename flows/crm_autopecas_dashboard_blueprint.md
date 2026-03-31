@@ -299,3 +299,246 @@ Após cliente confirmar itens, o flow deve:
 - [ ] Criar dashboards por aba.
 - [ ] Publicar alertas e métricas de SLA.
 
+
+---
+
+## 12) Implantação de cada item (passo a passo prático)
+
+> Ordem recomendada: banco de dados -> cadastros base -> bot -> humano -> PIX -> recibo -> dashboards -> alertas.
+
+## 12.1 Item: Criar tabelas e estrutura de dados
+
+### Ações
+
+1. Criar script SQL inicial com todas as tabelas.
+2. Criar índices para consulta rápida por status e datas.
+3. Criar tabela de auditoria de transição (`status_log`).
+
+### SQL base (resumo)
+
+- `leads(id, telefone unique, status, created_at, updated_at)`
+- `atendimentos(id, lead_id, vendedor_id, status, created_at)`
+- `pedidos(id, atendimento_id, status, total, pix_txid, pago_em)`
+- `vendedores(id, nome, ativo, pix_chave_tipo, pix_chave_valor)`
+- `estoque(id, sku unique, quantidade_disponivel, preco_unitario)`
+- `recibos(id, pedido_id, tipo, arquivo_url, gerado_em)`
+- `status_log(id, entidade, entidade_id, de_status, para_status, usuario, data_evento)`
+
+### Critérios de aceite
+
+- Inserir, consultar e atualizar registros de todas as tabelas.
+- Toda mudança de status gera linha em `status_log`.
+
+## 12.2 Item: Cadastro de vendedores (com chave PIX da empresa)
+
+### Ações
+
+1. Criar formulário no dashboard para cadastrar vendedor.
+2. Campos obrigatórios: nome, telefone, ativo.
+3. Preencher automaticamente:
+   - `pix_chave_tipo = cpf`
+   - `pix_chave_valor = 02445780012`
+
+### Regra
+
+- Não permitir salvar vendedor sem status `ativo` definido.
+- Não permitir troca da chave PIX oficial via painel de vendedor.
+
+### Critérios de aceite
+
+- Vendedor cadastrado aparece na fila de distribuição.
+- Chave PIX da empresa aplicada em todas as cobranças.
+
+## 12.3 Item: Cadastro e visão de estoque
+
+### Ações
+
+1. Criar formulário CRUD de estoque (SKU, descrição, saldo, preço).
+2. Criar consulta por texto (SKU/descrição) para uso no atendimento.
+3. Criar alerta de estoque baixo (ex.: saldo < 5).
+
+### Critérios de aceite
+
+- Vendedor consegue consultar item durante o chat.
+- Itens indisponíveis geram aviso antes da proposta.
+
+## 12.4 Item: Fluxo de triagem do bot
+
+### Ações
+
+1. Configurar webhook de entrada WhatsApp.
+2. Validar assinatura/HMAC.
+3. Salvar contexto de conversa por telefone.
+4. Perguntar sequencialmente:
+   - Nome
+   - Empresa
+   - Itens desejados
+   - Estado e cidade
+5. Marcar `dados_incompletos` quando faltar dado essencial.
+6. Ao completar, definir `lead_qualificado_bot`.
+
+### Critérios de aceite
+
+- Lead novo é criado automaticamente.
+- Todos os campos mínimos são coletados antes da transferência.
+
+## 12.5 Item: Transferência para atendimento humano
+
+### Ações
+
+1. Enviar lead para fila humana (`link out`).
+2. Aplicar roteamento de vendedor (round-robin ou menor fila).
+3. Criar `atendimento` com status `transferido_vendedor`.
+4. Notificar cliente: “vendedor especialista irá continuar”.
+
+### Critérios de aceite
+
+- Cada lead qualificado fica com um vendedor responsável.
+- Cliente recebe confirmação da transferência no chat.
+
+## 12.6 Item: Negociação e criação de pedido
+
+### Ações
+
+1. Vendedor consulta estoque no fluxo.
+2. Vendedor monta proposta com itens e total.
+3. Cliente aprova itens no chat.
+4. Sistema cria pedido em `aguardando_conferencia`.
+
+### Critérios de aceite
+
+- Pedido só nasce após proposta enviada.
+- Histórico de alterações de item fica registrado.
+
+## 12.7 Item: Geração de PIX no chat
+
+### Ações
+
+1. Após confirmação de itens, chamar provedor PIX.
+2. Informar valor total e descrição do pedido.
+3. Salvar `pix_txid` e `pix_copia_cola`.
+4. Enviar mensagem no chat com resumo + PIX.
+5. Atualizar status para `aguardando_pagamento`.
+
+### Critérios de aceite
+
+- PIX chega no chat no mesmo atendimento.
+- Sem PIX gerado, não avançar para fechamento.
+
+## 12.8 Item: Recibo provisório e recibo definitivo
+
+### Ações
+
+1. Gerar recibo provisório no momento da cobrança.
+2. Ouvir webhook de confirmação de pagamento.
+3. Validar TXID e valor.
+4. Gerar recibo definitivo (PDF) com status pago.
+5. Enviar link de download no chat.
+
+### Critérios de aceite
+
+- Cliente consegue baixar recibo definitivo após pagamento confirmado.
+- Recibo provisório e definitivo ficam vinculados ao pedido.
+
+## 12.9 Item: Fechamento da venda pelo vendedor
+
+### Ações
+
+1. Após `pagamento_confirmado`, liberar botão `Fechar venda`.
+2. Ao clicar:
+   - pedido -> `fechado`
+   - atendimento -> `atendimento_finalizado`
+   - status CRM -> `venda_fechada`
+3. Gravar auditoria da operação.
+
+### Critérios de aceite
+
+- Não é possível fechar venda sem pagamento confirmado.
+- Métricas de faturamento atualizam imediatamente no dashboard.
+
+## 12.10 Item: Dashboard de operação
+
+### Ações
+
+1. Criar cards de volume diário.
+2. Criar tabela de fila por status.
+3. Criar visão por vendedor (em atendimento, finalizados, conversão).
+
+### Critérios de aceite
+
+- Time operacional acompanha gargalos em tempo real.
+
+## 12.11 Item: Dashboard de pedidos e faturamento
+
+### Ações
+
+1. Card pedidos criados.
+2. Card pedidos fechados.
+3. Card valor vendido (dia/mês).
+4. Gráfico de evolução diária.
+5. Funil comercial de conversão.
+
+### Critérios de aceite
+
+- Números batem com dados em `pedidos`.
+
+## 12.12 Item: Dashboard de clientes e estoque
+
+### Ações
+
+1. Ranking de principais clientes por volume/valor.
+2. Itens mais procurados.
+3. Itens com estoque crítico.
+4. Alerta de ruptura no momento da negociação.
+
+### Critérios de aceite
+
+- Comercial e estoque trabalham com a mesma base de dados.
+
+## 12.13 Item: Alertas e automações
+
+### Ações
+
+1. Lembretes automáticos de pagamento (30min, 2h, 24h).
+2. Alerta para gerente quando pedidos pendentes > limite.
+3. Reatribuição automática se SLA de primeiro retorno estourar.
+
+### Critérios de aceite
+
+- Redução de pedidos em aberto sem retorno.
+
+## 12.14 Item: Segurança e conformidade
+
+### Ações
+
+1. Validar assinatura dos webhooks.
+2. Mascarar CPF em telas públicas (exibir parcial).
+3. Registrar logs de acesso e alteração de status.
+4. Limitar ações críticas (fechar venda, estorno) por perfil.
+
+### Critérios de aceite
+
+- Auditoria completa de eventos críticos.
+- Sem endpoint de webhook aberto sem validação.
+
+---
+
+## 13) Plano de execução em 7 dias (sugestão)
+
+- **Dia 1:** banco + tabelas + status_log.
+- **Dia 2:** cadastros de vendedor e estoque.
+- **Dia 3:** fluxo de bot e qualificação de lead.
+- **Dia 4:** fluxo humano + proposta + criação de pedido.
+- **Dia 5:** integração PIX + aguardando pagamento.
+- **Dia 6:** confirmação pagamento + recibo definitivo + fechar venda.
+- **Dia 7:** dashboards, alertas e validação final E2E.
+
+---
+
+## 14) Critério de pronto (Definition of Done)
+
+- Lead entra via bot e chega ao vendedor com dados completos.
+- Pedido é conferido e PIX enviado no próprio chat.
+- Atendimento muda para `aguardando_pagamento` após gerar cobrança.
+- Após pagamento, recibo definitivo fica disponível para download.
+- Vendedor fecha a venda e dashboards refletem os indicadores em tempo real.
