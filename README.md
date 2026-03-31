@@ -41,6 +41,11 @@ Também foi adicionado um pacote completo de implantação do CRM Autopeças:
 - Guia de implantação: `flows/crm_autopecas_implantacao.md`
 - Schema SQL: `sql/crm_autopecas_schema.sql`
 
+O schema já contempla o bloco de **pós-venda e retenção** (alta prioridade), com:
+- gestão de garantia/devolução/recall/manutenção/recompra;
+- agenda de manutenção periódica por cliente/frota;
+- segmentação de retenção para campanhas de recompra.
+
 Fluxo recomendado:
 1. Aplicar o SQL no PostgreSQL.
 2. Importar o flow completo no Node-RED.

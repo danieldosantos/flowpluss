@@ -13,6 +13,7 @@ Implementar um CRM de atendimento para autopeças com:
 - Status ponta a ponta (lead até venda fechada).
 - Dashboards operacionais e gerenciais.
 - Visão integrada de estoque no atendimento.
+- Pós-venda e retenção com recompra, garantia, troca/devolução, recall e manutenção periódica por cliente/frota.
 
 ---
 
@@ -93,6 +94,52 @@ Implementar um CRM de atendimento para autopeças com:
 - `tipo` (provisorio/definitivo)
 - `arquivo_url`
 - `gerado_em`
+
+## 2.7 `ativos_cliente` (cliente/frota)
+
+- `id` (uuid)
+- `lead_id` (fk)
+- `descricao_ativo`
+- `placa`
+- `modelo`
+- `ano_modelo`
+- `quilometragem_atual`
+- `periodicidade_manutencao_dias`
+- `ultima_manutencao_em`
+- `proxima_manutencao_em`
+- `ativo`
+- `updated_at`
+
+## 2.8 `pos_venda_casos`
+
+- `id` (uuid)
+- `lead_id` (fk)
+- `atendimento_id` (fk opcional)
+- `pedido_id` (fk opcional)
+- `ativo_cliente_id` (fk opcional)
+- `tipo` (`garantia`, `devolucao_troca`, `recall`, `manutencao`, `recompra`)
+- `status` (`aberto`, `em_analise`, `aprovado`, `rejeitado`, `em_execucao`, `concluido`, `cancelado`)
+- `prioridade` (1-5)
+- `prazo_sla_em`
+- `concluido_em`
+- `resolucao`
+
+## 2.9 `manutencoes_agendadas`
+
+- `id` (uuid)
+- `ativo_cliente_id` (fk)
+- `pedido_id` (fk opcional)
+- `pos_venda_caso_id` (fk opcional)
+- `tipo_servico`
+- `agendado_para`
+- `executado_em`
+- `status`
+- `canal_notificacao`
+
+## 2.10 `campanhas_retencao` e `campanhas_retencao_execucoes`
+
+- Campanhas para recompra/reativação com janela de vigência.
+- Execuções por cliente com status de envio, resposta e conversão em pedido.
 
 ---
 
@@ -253,6 +300,15 @@ Após cliente confirmar itens, o flow deve:
 - **Card**: pendências de pagamento
 - **Tabela**: pedidos em `aguardando_pagamento`
 
+## 7.6 Aba: Pós-venda & Retenção
+
+- **Card**: casos pós-venda abertos
+- **Card**: SLA estourado por tipo de caso
+- **Tabela**: fila de garantia/troca/recall/manutenção por prioridade
+- **Tabela**: ativos com manutenção vencendo ou atrasada
+- **Card**: clientes em risco de churn (sem recompra)
+- **Funil**: campanha enviada → respondeu → recompra
+
 ---
 
 ## 8) Regras de negócio críticas
@@ -262,6 +318,8 @@ Após cliente confirmar itens, o flow deve:
 - Recibo definitivo só é liberado após confirmação do pagamento.
 - Estoque deve ser consultado antes de enviar proposta final.
 - Toda transição de status deve ser auditada (`status_log`).
+- Caso de pós-venda com prazo vencido entra em alerta de SLA.
+- Cliente com histórico e sem recompra deve entrar em campanha de retenção.
 
 ---
 
@@ -270,6 +328,8 @@ Após cliente confirmar itens, o flow deve:
 - Lembrete automático de pagamento (30 min / 2 h / 24 h).
 - Reatribuição automática se vendedor ficar inativo por SLA.
 - Alerta para gerente quando houver muitos pedidos pendentes de pagamento.
+- Geração automática da próxima manutenção periódica por ativo/frota.
+- Régua de retenção para clientes sem recompra em janelas configuráveis (30/60/120 dias).
 
 ---
 
@@ -298,6 +358,8 @@ Após cliente confirmar itens, o flow deve:
 - [ ] Implementar gerador de recibo provisório e definitivo.
 - [ ] Criar dashboards por aba.
 - [ ] Publicar alertas e métricas de SLA.
+- [ ] Criar módulo de pós-venda (`ativos_cliente`, `pos_venda_casos`, `manutencoes_agendadas`).
+- [ ] Criar módulo de retenção/recompra (`campanhas_retencao`, `campanhas_retencao_execucoes`).
 
 
 ---
