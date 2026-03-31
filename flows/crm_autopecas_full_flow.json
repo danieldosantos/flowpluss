@@ -577,10 +577,11 @@
     "y": 100,
     "wires": [
       [
-        "crm_pg_kpis_operacao",
-        "crm_pg_kpis_vendas",
-        "crm_pg_kpis_financeiro",
-        "crm_pg_kpis_clientes"
+        "crm_fn_prep_kpi_operacao",
+        "crm_fn_prep_kpi_vendas",
+        "crm_fn_prep_kpi_financeiro",
+        "crm_fn_prep_kpi_clientes",
+        "crm_inject_refresh_fila"
       ]
     ]
   },
@@ -592,7 +593,7 @@
     "name": "Query KPIs Operação",
     "output": true,
     "perrow": false,
-    "query": "SELECT COUNT(*) FILTER (WHERE created_at::date = current_date) AS atendimentos_hoje, COUNT(*) FILTER (WHERE status = 'em_atendimento_humano') AS em_atendimento_humano, COUNT(*) FILTER (WHERE status = 'aguardando_pagamento') AS aguardando_pagamento FROM atendimentos",
+    "query": "",
     "x": 430,
     "y": 100,
     "wires": [
@@ -711,7 +712,7 @@
     "fwdInMessages": true,
     "resendOnRefresh": true,
     "templateScope": "local",
-    "template": "<style>\n.crm-menu a { display:block; margin:8px 0; padding:10px 12px; border:1px solid #d9d9d9; border-radius:8px; text-decoration:none; color:#1f2937; font-weight:600; }\n.crm-menu a:hover { background:#f3f4f6; }\n.crm-menu small { color:#6b7280; }\n</style>\n<div class=\"crm-menu\">\n  <h3>Menu principal do CRM Autopeças</h3>\n  <p>Acesse as telas:</p>\n  <a href=\"/ui\" target=\"_blank\">🏠 Dashboard (home)</a>\n  <a href=\"/ui/#!/0\" target=\"_blank\">📍 Menu CRM</a>\n  <a href=\"/ui/#!/1\" target=\"_blank\">📊 Operação</a>\n  <a href=\"/ui/#!/2\" target=\"_blank\">💼 Vendas</a>\n  <a href=\"/ui/#!/3\" target=\"_blank\">💳 Financeiro PIX</a>\n  <a href=\"/ui/#!/4\" target=\"_blank\">📦 Clientes & Estoque</a>\n  <small>Se o índice mudar após importação, use o menu lateral do /ui.</small>\n</div>",
+    "template": "<style>\n.crm-menu a { display:block; margin:8px 0; padding:10px 12px; border:1px solid #d9d9d9; border-radius:8px; text-decoration:none; color:#1f2937; font-weight:600; }\n.crm-menu a:hover { background:#f3f4f6; }\n.crm-menu small { color:#6b7280; }\n</style>\n<div class=\"crm-menu\">\n  <h3>Menu principal do CRM Autopeças</h3>\n  <p>Acesse as telas:</p>\n  <a href=\"/ui\" target=\"_blank\">🏠 Dashboard (home)</a>\n  <a href=\"/ui/#!/0\" target=\"_blank\">📍 Menu CRM</a>\n  <a href=\"/ui/#!/1\" target=\"_blank\">🧑‍💼 Atendimento</a>\n  <a href=\"/ui/#!/2\" target=\"_blank\">📊 Operação</a>\n  <a href=\"/ui/#!/3\" target=\"_blank\">💼 Vendas</a>\n  <a href=\"/ui/#!/4\" target=\"_blank\">💳 Financeiro PIX</a>\n  <a href=\"/ui/#!/5\" target=\"_blank\">📦 Clientes & Estoque</a>\n  <small>Se o índice mudar após importação, use o menu lateral do /ui.</small>\n</div>",
     "x": 1010,
     "y": 360,
     "wires": [
@@ -783,7 +784,7 @@
     "name": "Query KPIs Vendas",
     "output": true,
     "perrow": false,
-    "query": "SELECT COUNT(*) FILTER (WHERE created_at::date = current_date) AS pedidos_hoje, COALESCE(SUM(total) FILTER (WHERE status = 'pago' AND pago_em::date = current_date),0) AS faturamento_hoje, COALESCE(AVG(total) FILTER (WHERE status = 'pago' AND pago_em::date = current_date),0) AS ticket_medio_hoje FROM pedidos",
+    "query": "",
     "x": 430,
     "y": 460,
     "wires": [
@@ -869,7 +870,7 @@
     "name": "Query KPIs Financeiro PIX",
     "output": true,
     "perrow": false,
-    "query": "SELECT COUNT(*) FILTER (WHERE status = 'aguardando_pagamento') AS pedidos_aguardando_pix, COUNT(*) FILTER (WHERE status = 'pago' AND pago_em::date = current_date) AS pagamentos_confirmados_hoje, COALESCE(SUM(total) FILTER (WHERE status = 'pago' AND pago_em::date = current_date),0) AS recebido_hoje FROM pedidos",
+    "query": "",
     "x": 450,
     "y": 580,
     "wires": [
@@ -955,7 +956,7 @@
     "name": "Query KPIs Clientes/Estoque",
     "output": true,
     "perrow": false,
-    "query": "SELECT (SELECT COUNT(*) FROM leads WHERE created_at::date = current_date) AS novos_leads_hoje, (SELECT COUNT(*) FROM leads WHERE status = 'lead_qualificado_bot') AS leads_qualificados, (SELECT COUNT(*) FROM estoque WHERE ativo = true AND quantidade_disponivel <= 5) AS itens_estoque_baixo",
+    "query": "",
     "x": 460,
     "y": 700,
     "wires": [
@@ -1031,6 +1032,599 @@
     "layout": "row-spread",
     "x": 1000,
     "y": 740,
+    "wires": []
+  },
+  {
+    "id": "crm_fn_prep_kpi_operacao",
+    "type": "function",
+    "z": "crm_tab_unificado",
+    "name": "Prep query KPI Operação",
+    "func": "msg.topic = \"SELECT COUNT(*) FILTER (WHERE created_at::date = current_date) AS atendimentos_hoje, COUNT(*) FILTER (WHERE status = 'em_atendimento_humano') AS em_atendimento_humano, COUNT(*) FILTER (WHERE status = 'aguardando_pagamento') AS aguardando_pagamento FROM atendimentos\";\nmsg.payload = [];\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 210,
+    "y": 60,
+    "wires": [
+      [
+        "crm_pg_kpis_operacao"
+      ]
+    ]
+  },
+  {
+    "id": "crm_fn_prep_kpi_vendas",
+    "type": "function",
+    "z": "crm_tab_unificado",
+    "name": "Prep query KPI Vendas",
+    "func": "msg.topic = \"SELECT COUNT(*) FILTER (WHERE created_at::date = current_date) AS pedidos_hoje, COALESCE(SUM(total) FILTER (WHERE created_at::date = current_date),0) AS faturamento_hoje, COALESCE(AVG(total) FILTER (WHERE created_at::date = current_date),0) AS ticket_medio FROM pedidos\";\nmsg.payload = [];\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 200,
+    "y": 420,
+    "wires": [
+      [
+        "crm_pg_kpis_vendas"
+      ]
+    ]
+  },
+  {
+    "id": "crm_fn_prep_kpi_financeiro",
+    "type": "function",
+    "z": "crm_tab_unificado",
+    "name": "Prep query KPI Financeiro",
+    "func": "msg.topic = \"SELECT COUNT(*) FILTER (WHERE status = 'aguardando_pagamento') AS aguardando_pix, COUNT(*) FILTER (WHERE status = 'pago' AND updated_at::date = current_date) AS pagos_hoje, COALESCE(SUM(total) FILTER (WHERE status = 'pago' AND updated_at::date = current_date),0) AS recebido_hoje FROM pedidos\";\nmsg.payload = [];\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 220,
+    "y": 720,
+    "wires": [
+      [
+        "crm_pg_kpis_financeiro"
+      ]
+    ]
+  },
+  {
+    "id": "crm_fn_prep_kpi_clientes",
+    "type": "function",
+    "z": "crm_tab_unificado",
+    "name": "Prep query KPI Clientes/Estoque",
+    "func": "msg.topic = \"SELECT (SELECT COUNT(*) FROM leads WHERE created_at::date = current_date) AS novos_leads_hoje, (SELECT COUNT(*) FROM leads WHERE status = 'lead_qualificado_bot') AS leads_qualificados, (SELECT COUNT(*) FROM estoque WHERE ativo = true AND quantidade_disponivel <= 5) AS itens_estoque_baixo\";\nmsg.payload = [];\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 230,
+    "y": 1030,
+    "wires": [
+      [
+        "crm_pg_kpis_clientes"
+      ]
+    ]
+  },
+  {
+    "id": "crm_ui_tab_atendimento",
+    "type": "ui_tab",
+    "name": "Atendimento",
+    "icon": "people",
+    "disabled": false,
+    "hidden": false
+  },
+  {
+    "id": "crm_ui_group_fila",
+    "type": "ui_group",
+    "name": "Fila do Bot",
+    "tab": "crm_ui_tab_atendimento",
+    "order": 1,
+    "disp": true,
+    "width": "24",
+    "collapse": false
+  },
+  {
+    "id": "crm_ui_group_vendedor",
+    "type": "ui_group",
+    "name": "Cadastro de Vendedor",
+    "tab": "crm_ui_tab_atendimento",
+    "order": 2,
+    "disp": true,
+    "width": "12",
+    "collapse": false
+  },
+  {
+    "id": "crm_ui_group_estoque",
+    "type": "ui_group",
+    "name": "Itens e Estoque",
+    "tab": "crm_ui_tab_atendimento",
+    "order": 3,
+    "disp": true,
+    "width": "12",
+    "collapse": false
+  },
+  {
+    "id": "crm_inject_refresh_fila",
+    "type": "inject",
+    "z": "crm_tab_unificado",
+    "name": "Refresh fila atendimento",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "15",
+    "once": true,
+    "onceDelay": "2",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 180,
+    "y": 1180,
+    "wires": [
+      [
+        "crm_fn_prep_fila_atendimento"
+      ]
+    ]
+  },
+  {
+    "id": "crm_fn_prep_fila_atendimento",
+    "type": "function",
+    "z": "crm_tab_unificado",
+    "name": "Prep query fila atendimento",
+    "func": "msg.topic = `SELECT a.id, COALESCE(l.nome,'Lead sem nome') AS cliente, COALESCE(v.nome,'Sem vendedor') AS vendedor, a.status, to_char(a.created_at,'DD/MM HH24:MI') AS criado_em\nFROM atendimentos a\nLEFT JOIN leads l ON l.id = a.lead_id\nLEFT JOIN vendedores v ON v.id = a.vendedor_id\nWHERE a.status IN ('transferido_vendedor','em_atendimento_humano','lead_qualificado_bot')\nORDER BY a.created_at DESC\nLIMIT 30`;\nmsg.payload = [];\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 430,
+    "y": 1180,
+    "wires": [
+      [
+        "crm_pg_fila_atendimento"
+      ]
+    ]
+  },
+  {
+    "id": "crm_pg_fila_atendimento",
+    "type": "postgres",
+    "z": "crm_tab_unificado",
+    "postgresdb": "crm_postgres_config",
+    "name": "Query fila atendimento",
+    "output": true,
+    "perrow": false,
+    "query": "",
+    "x": 700,
+    "y": 1180,
+    "wires": [
+      [
+        "crm_fn_format_fila"
+      ]
+    ]
+  },
+  {
+    "id": "crm_fn_format_fila",
+    "type": "function",
+    "z": "crm_tab_unificado",
+    "name": "Formata fila para dashboard",
+    "func": "const rows = Array.isArray(msg.payload) ? msg.payload : [];\nif (!rows.length) {\n  msg.payload = '<p>Nenhum atendimento pendente no momento.</p>';\n  return msg;\n}\nconst htmlRows = rows.map(r => `<tr><td>${r.id}</td><td>${r.cliente}</td><td>${r.vendedor}</td><td>${r.status}</td><td>${r.criado_em}</td></tr>`).join('');\nmsg.payload = `<table style=\"width:100%;border-collapse:collapse\"><thead><tr><th>ID</th><th>Cliente</th><th>Vendedor</th><th>Status</th><th>Criado em</th></tr></thead><tbody>${htmlRows}</tbody></table>`;\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 950,
+    "y": 1180,
+    "wires": [
+      [
+        "crm_ui_template_fila"
+      ]
+    ]
+  },
+  {
+    "id": "crm_ui_template_fila",
+    "type": "ui_template",
+    "z": "crm_tab_unificado",
+    "group": "crm_ui_group_fila",
+    "name": "Fila do atendimento",
+    "order": 1,
+    "width": "24",
+    "height": "10",
+    "format": "<style>table, th, td { border: 1px solid #e5e7eb; padding: 6px; font-size: 12px; } th{background:#f3f4f6;text-align:left}</style><div ng-bind-html=\"msg.payload\"></div>",
+    "storeOutMessages": true,
+    "fwdInMessages": true,
+    "resendOnRefresh": true,
+    "templateScope": "local",
+    "className": "",
+    "x": 1200,
+    "y": 1180,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "crm_ui_form_vendedor",
+    "type": "ui_form",
+    "z": "crm_tab_unificado",
+    "name": "Form vendedor",
+    "label": "Cadastrar vendedor",
+    "group": "crm_ui_group_vendedor",
+    "order": 1,
+    "width": "12",
+    "height": "8",
+    "options": [
+      {
+        "label": "Nome",
+        "value": "nome",
+        "type": "text",
+        "required": true,
+        "rows": null
+      },
+      {
+        "label": "WhatsApp",
+        "value": "whatsapp",
+        "type": "text",
+        "required": false,
+        "rows": null
+      },
+      {
+        "label": "Ativo (true/false)",
+        "value": "ativo",
+        "type": "text",
+        "required": false,
+        "rows": null
+      }
+    ],
+    "formValue": {
+      "nome": "",
+      "whatsapp": "",
+      "ativo": "true"
+    },
+    "payload": "",
+    "submit": "Salvar vendedor",
+    "cancel": "Limpar",
+    "topic": "",
+    "topicType": "str",
+    "splitLayout": "",
+    "className": "",
+    "x": 170,
+    "y": 1260,
+    "wires": [
+      [
+        "crm_fn_insert_vendedor"
+      ]
+    ]
+  },
+  {
+    "id": "crm_fn_insert_vendedor",
+    "type": "function",
+    "z": "crm_tab_unificado",
+    "name": "SQL insert vendedor",
+    "func": "const d = msg.payload || {};\nmsg.topic = 'INSERT INTO vendedores (nome, whatsapp, ativo) VALUES ($1,$2,$3) RETURNING id, nome';\nmsg.payload = [d.nome, d.whatsapp || null, String(d.ativo || 'true').toLowerCase() !== 'false'];\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 1260,
+    "wires": [
+      [
+        "crm_pg_insert_vendedor"
+      ]
+    ]
+  },
+  {
+    "id": "crm_pg_insert_vendedor",
+    "type": "postgres",
+    "z": "crm_tab_unificado",
+    "postgresdb": "crm_postgres_config",
+    "name": "Insert vendedor",
+    "output": true,
+    "perrow": false,
+    "query": "",
+    "x": 670,
+    "y": 1260,
+    "wires": [
+      [
+        "crm_fn_toast_vendedor"
+      ]
+    ]
+  },
+  {
+    "id": "crm_fn_toast_vendedor",
+    "type": "function",
+    "z": "crm_tab_unificado",
+    "name": "Mensagem vendedor salvo",
+    "func": "const row = Array.isArray(msg.payload) ? msg.payload[0] : null;\nmsg.payload = row ? `✅ Vendedor ${row.nome} cadastrado (ID ${row.id})` : '✅ Vendedor cadastrado';\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 930,
+    "y": 1260,
+    "wires": [
+      [
+        "crm_ui_toast_vendedor"
+      ]
+    ]
+  },
+  {
+    "id": "crm_ui_toast_vendedor",
+    "type": "ui_toast",
+    "z": "crm_tab_unificado",
+    "position": "top right",
+    "displayTime": "4",
+    "highlight": "",
+    "sendall": true,
+    "outputs": 0,
+    "ok": "OK",
+    "cancel": "",
+    "raw": false,
+    "topic": "",
+    "name": "Toast vendedor",
+    "x": 1170,
+    "y": 1260,
+    "wires": []
+  },
+  {
+    "id": "crm_ui_form_item",
+    "type": "ui_form",
+    "z": "crm_tab_unificado",
+    "name": "Form item",
+    "label": "Cadastrar item",
+    "group": "crm_ui_group_estoque",
+    "order": 1,
+    "width": "12",
+    "height": "8",
+    "options": [
+      {
+        "label": "SKU",
+        "value": "sku",
+        "type": "text",
+        "required": true,
+        "rows": null
+      },
+      {
+        "label": "Descrição",
+        "value": "descricao",
+        "type": "text",
+        "required": true,
+        "rows": null
+      },
+      {
+        "label": "Qtd inicial",
+        "value": "quantidade",
+        "type": "number",
+        "required": true,
+        "rows": null
+      },
+      {
+        "label": "Preço unitário",
+        "value": "preco",
+        "type": "number",
+        "required": true,
+        "rows": null
+      }
+    ],
+    "formValue": {
+      "sku": "",
+      "descricao": "",
+      "quantidade": "0",
+      "preco": "0"
+    },
+    "payload": "",
+    "submit": "Salvar item",
+    "cancel": "Limpar",
+    "topic": "",
+    "topicType": "str",
+    "splitLayout": "",
+    "className": "",
+    "x": 150,
+    "y": 1340,
+    "wires": [
+      [
+        "crm_fn_insert_item"
+      ]
+    ]
+  },
+  {
+    "id": "crm_fn_insert_item",
+    "type": "function",
+    "z": "crm_tab_unificado",
+    "name": "SQL upsert item",
+    "func": "const d = msg.payload || {};\nmsg.topic = `INSERT INTO estoque (sku, descricao, quantidade_disponivel, preco_unitario, ativo) VALUES ($1,$2,$3,$4,true)\nON CONFLICT (sku) DO UPDATE SET descricao = EXCLUDED.descricao, quantidade_disponivel = EXCLUDED.quantidade_disponivel, preco_unitario = EXCLUDED.preco_unitario, ativo = true\nRETURNING sku, descricao`;\nmsg.payload = [d.sku, d.descricao, Number(d.quantidade || 0), Number(d.preco || 0)];\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 410,
+    "y": 1340,
+    "wires": [
+      [
+        "crm_pg_insert_item"
+      ]
+    ]
+  },
+  {
+    "id": "crm_pg_insert_item",
+    "type": "postgres",
+    "z": "crm_tab_unificado",
+    "postgresdb": "crm_postgres_config",
+    "name": "Upsert item",
+    "output": true,
+    "perrow": false,
+    "query": "",
+    "x": 650,
+    "y": 1340,
+    "wires": [
+      [
+        "crm_fn_toast_item"
+      ]
+    ]
+  },
+  {
+    "id": "crm_fn_toast_item",
+    "type": "function",
+    "z": "crm_tab_unificado",
+    "name": "Mensagem item salvo",
+    "func": "const row = Array.isArray(msg.payload) ? msg.payload[0] : null;\nmsg.payload = row ? `✅ Item ${row.sku} salvo` : '✅ Item salvo';\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 890,
+    "y": 1340,
+    "wires": [
+      [
+        "crm_ui_toast_item"
+      ]
+    ]
+  },
+  {
+    "id": "crm_ui_toast_item",
+    "type": "ui_toast",
+    "z": "crm_tab_unificado",
+    "position": "top right",
+    "displayTime": "4",
+    "highlight": "",
+    "sendall": true,
+    "outputs": 0,
+    "ok": "OK",
+    "cancel": "",
+    "raw": false,
+    "topic": "",
+    "name": "Toast item",
+    "x": 1120,
+    "y": 1340,
+    "wires": []
+  },
+  {
+    "id": "crm_ui_form_ajuste_estoque",
+    "type": "ui_form",
+    "z": "crm_tab_unificado",
+    "name": "Form ajuste estoque",
+    "label": "Ajustar estoque",
+    "group": "crm_ui_group_estoque",
+    "order": 2,
+    "width": "12",
+    "height": "6",
+    "options": [
+      {
+        "label": "SKU",
+        "value": "sku",
+        "type": "text",
+        "required": true,
+        "rows": null
+      },
+      {
+        "label": "Nova quantidade",
+        "value": "quantidade",
+        "type": "number",
+        "required": true,
+        "rows": null
+      }
+    ],
+    "formValue": {
+      "sku": "",
+      "quantidade": "0"
+    },
+    "payload": "",
+    "submit": "Atualizar estoque",
+    "cancel": "Limpar",
+    "topic": "",
+    "topicType": "str",
+    "splitLayout": "",
+    "className": "",
+    "x": 170,
+    "y": 1420,
+    "wires": [
+      [
+        "crm_fn_update_estoque"
+      ]
+    ]
+  },
+  {
+    "id": "crm_fn_update_estoque",
+    "type": "function",
+    "z": "crm_tab_unificado",
+    "name": "SQL ajuste estoque",
+    "func": "const d = msg.payload || {};\nmsg.topic = 'UPDATE estoque SET quantidade_disponivel = $1, updated_at = now() WHERE sku = $2 RETURNING sku, quantidade_disponivel';\nmsg.payload = [Number(d.quantidade || 0), d.sku];\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 1420,
+    "wires": [
+      [
+        "crm_pg_update_estoque"
+      ]
+    ]
+  },
+  {
+    "id": "crm_pg_update_estoque",
+    "type": "postgres",
+    "z": "crm_tab_unificado",
+    "postgresdb": "crm_postgres_config",
+    "name": "Update estoque",
+    "output": true,
+    "perrow": false,
+    "query": "",
+    "x": 660,
+    "y": 1420,
+    "wires": [
+      [
+        "crm_fn_toast_estoque"
+      ]
+    ]
+  },
+  {
+    "id": "crm_fn_toast_estoque",
+    "type": "function",
+    "z": "crm_tab_unificado",
+    "name": "Mensagem estoque atualizado",
+    "func": "const row = Array.isArray(msg.payload) ? msg.payload[0] : null;\nmsg.payload = row ? `✅ Estoque de ${row.sku} atualizado para ${row.quantidade_disponivel}` : '⚠️ SKU não encontrado';\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 930,
+    "y": 1420,
+    "wires": [
+      [
+        "crm_ui_toast_estoque",
+        "crm_inject_refresh_fila"
+      ]
+    ]
+  },
+  {
+    "id": "crm_ui_toast_estoque",
+    "type": "ui_toast",
+    "z": "crm_tab_unificado",
+    "position": "top right",
+    "displayTime": "4",
+    "highlight": "",
+    "sendall": true,
+    "outputs": 0,
+    "ok": "OK",
+    "cancel": "",
+    "raw": false,
+    "topic": "",
+    "name": "Toast estoque",
+    "x": 1170,
+    "y": 1420,
     "wires": []
   }
 ]
