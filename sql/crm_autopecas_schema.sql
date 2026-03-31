@@ -558,6 +558,57 @@ CREATE TABLE IF NOT EXISTS pipeline_etapas (
   CONSTRAINT ck_pipeline_sla_positivo CHECK (sla_minutos > 0)
 );
 
+CREATE TABLE IF NOT EXISTS metas_vendedores (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  vendedor_id uuid NOT NULL REFERENCES vendedores(id) ON DELETE CASCADE,
+  competencia date NOT NULL,
+  meta_receita numeric(14,2) NOT NULL DEFAULT 0,
+  meta_pedidos integer NOT NULL DEFAULT 0,
+  meta_atendimentos integer NOT NULL DEFAULT 0,
+  meta_conversao_percentual numeric(5,2) NOT NULL DEFAULT 0,
+  meta_margem_percentual numeric(5,2) NOT NULL DEFAULT 0,
+  percentual_comissao_base numeric(5,2) NOT NULL DEFAULT 0,
+  bonus_superacao_percentual numeric(5,2) NOT NULL DEFAULT 0,
+  ativo boolean NOT NULL DEFAULT true,
+  observacoes text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT uk_metas_vendedores_competencia UNIQUE (vendedor_id, competencia),
+  CONSTRAINT ck_metas_vendedores_faixas CHECK (
+    meta_receita >= 0
+    AND meta_pedidos >= 0
+    AND meta_atendimentos >= 0
+    AND meta_conversao_percentual BETWEEN 0 AND 100
+    AND meta_margem_percentual BETWEEN 0 AND 100
+    AND percentual_comissao_base BETWEEN 0 AND 100
+    AND bonus_superacao_percentual BETWEEN 0 AND 100
+  )
+);
+
+CREATE TABLE IF NOT EXISTS comissoes_vendedores (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  vendedor_id uuid NOT NULL REFERENCES vendedores(id) ON DELETE CASCADE,
+  pedido_id uuid REFERENCES pedidos(id) ON DELETE SET NULL,
+  competencia date NOT NULL,
+  status text NOT NULL DEFAULT 'pendente',
+  base_calculo numeric(14,2) NOT NULL DEFAULT 0,
+  margem_apurada_percentual numeric(7,2) NOT NULL DEFAULT 0,
+  percentual_comissao numeric(5,2) NOT NULL DEFAULT 0,
+  valor_comissao numeric(14,2) NOT NULL DEFAULT 0,
+  regra_aplicada text,
+  pago_em timestamptz,
+  detalhes jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT uk_comissao_por_pedido UNIQUE (pedido_id),
+  CONSTRAINT ck_comissoes_vendedores_status CHECK (status IN ('pendente', 'aprovada', 'paga', 'cancelada')),
+  CONSTRAINT ck_comissoes_vendedores_valores CHECK (
+    base_calculo >= 0
+    AND percentual_comissao BETWEEN 0 AND 100
+    AND valor_comissao >= 0
+  )
+);
+
 CREATE TABLE IF NOT EXISTS ativos_cliente (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   lead_id uuid NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
@@ -748,6 +799,8 @@ CREATE INDEX IF NOT EXISTS idx_politicas_margem_lookup ON politicas_margem(ativo
 CREATE INDEX IF NOT EXISTS idx_campanhas_comerciais_ativas ON campanhas_comerciais(ativa, inicio_em, fim_em);
 CREATE INDEX IF NOT EXISTS idx_regua_cobranca_status_agenda ON regua_cobranca(status, agendado_para);
 CREATE INDEX IF NOT EXISTS idx_pipeline_etapas_lookup ON pipeline_etapas(entidade, etapa, ativo);
+CREATE INDEX IF NOT EXISTS idx_metas_vendedores_competencia ON metas_vendedores(competencia DESC, vendedor_id, ativo);
+CREATE INDEX IF NOT EXISTS idx_comissoes_vendedores_competencia ON comissoes_vendedores(competencia DESC, vendedor_id, status);
 CREATE INDEX IF NOT EXISTS idx_leads_sla_monitoria ON leads(status, etapa_entrada_em, ultimo_retorno_em);
 CREATE INDEX IF NOT EXISTS idx_pedidos_sla_monitoria ON pedidos(status, etapa_entrada_em, ultimo_retorno_em);
 CREATE INDEX IF NOT EXISTS idx_atendimentos_sla_monitoria ON atendimentos(status, etapa_entrada_em, ultimo_retorno_em);
@@ -1529,6 +1582,101 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
+CREATE OR REPLACE VIEW vw_desempenho_vendedores AS
+WITH atendimentos_mes AS (
+  SELECT
+    a.vendedor_id,
+    date_trunc('month', a.created_at)::date AS competencia,
+    COUNT(*) AS atendimentos_total,
+    COUNT(*) FILTER (WHERE a.status IN ('atendimento_finalizado', 'venda_fechada')) AS atendimentos_finalizados
+  FROM atendimentos a
+  WHERE a.vendedor_id IS NOT NULL
+  GROUP BY a.vendedor_id, date_trunc('month', a.created_at)::date
+),
+pedidos_mes AS (
+  SELECT
+    a.vendedor_id,
+    date_trunc('month', p.created_at)::date AS competencia,
+    COUNT(*) FILTER (WHERE p.status IN ('pago', 'fechado')) AS pedidos_convertidos,
+    COALESCE(SUM(p.total) FILTER (WHERE p.status IN ('pago', 'fechado')), 0)::numeric(14,2) AS receita_total,
+    COALESCE(AVG(NULLIF(p.total, 0)) FILTER (WHERE p.status IN ('pago', 'fechado')), 0)::numeric(14,2) AS ticket_medio,
+    COALESCE(
+      AVG(
+        CASE
+          WHEN itens.valor_bruto > 0 THEN round(((itens.valor_bruto - itens.custo_estimado) / itens.valor_bruto) * 100.0, 2)
+          ELSE NULL
+        END
+      ) FILTER (WHERE p.status IN ('pago', 'fechado')),
+      0
+    )::numeric(7,2) AS margem_media_percentual
+  FROM pedidos p
+  JOIN atendimentos a ON a.id = p.atendimento_id
+  LEFT JOIN LATERAL (
+    SELECT
+      COALESCE(SUM((item ->> 'preco_unitario')::numeric * COALESCE((item ->> 'quantidade')::numeric, 1)), 0) AS valor_bruto,
+      COALESCE(SUM(COALESCE((item ->> 'custo_unitario')::numeric, 0) * COALESCE((item ->> 'quantidade')::numeric, 1)), 0) AS custo_estimado
+    FROM jsonb_array_elements(COALESCE(p.itens, '[]'::jsonb)) item
+  ) itens ON true
+  WHERE a.vendedor_id IS NOT NULL
+  GROUP BY a.vendedor_id, date_trunc('month', p.created_at)::date
+),
+competencias AS (
+  SELECT vendedor_id, competencia FROM atendimentos_mes
+  UNION
+  SELECT vendedor_id, competencia FROM pedidos_mes
+  UNION
+  SELECT vendedor_id, competencia FROM metas_vendedores
+)
+SELECT
+  v.id AS vendedor_id,
+  v.nome AS vendedor_nome,
+  c.competencia,
+  COALESCE(am.atendimentos_total, 0) AS atendimentos_total,
+  COALESCE(am.atendimentos_finalizados, 0) AS atendimentos_finalizados,
+  COALESCE(pm.pedidos_convertidos, 0) AS pedidos_convertidos,
+  COALESCE(pm.receita_total, 0)::numeric(14,2) AS receita_total,
+  COALESCE(pm.ticket_medio, 0)::numeric(14,2) AS ticket_medio,
+  COALESCE(pm.margem_media_percentual, 0)::numeric(7,2) AS margem_media_percentual,
+  CASE
+    WHEN COALESCE(am.atendimentos_total, 0) = 0 THEN 0
+    ELSE round((COALESCE(pm.pedidos_convertidos, 0)::numeric / am.atendimentos_total::numeric) * 100.0, 2)
+  END::numeric(7,2) AS taxa_conversao_percentual,
+  mv.meta_receita,
+  mv.meta_pedidos,
+  mv.meta_atendimentos,
+  mv.meta_conversao_percentual,
+  mv.meta_margem_percentual,
+  mv.percentual_comissao_base,
+  mv.bonus_superacao_percentual,
+  CASE
+    WHEN COALESCE(mv.meta_receita, 0) = 0 THEN NULL
+    ELSE round((COALESCE(pm.receita_total, 0) / mv.meta_receita) * 100.0, 2)
+  END::numeric(7,2) AS atingimento_receita_percentual,
+  CASE
+    WHEN COALESCE(mv.meta_pedidos, 0) = 0 THEN NULL
+    ELSE round((COALESCE(pm.pedidos_convertidos, 0)::numeric / mv.meta_pedidos::numeric) * 100.0, 2)
+  END::numeric(7,2) AS atingimento_pedidos_percentual,
+  CASE
+    WHEN COALESCE(mv.meta_atendimentos, 0) = 0 THEN NULL
+    ELSE round((COALESCE(am.atendimentos_total, 0)::numeric / mv.meta_atendimentos::numeric) * 100.0, 2)
+  END::numeric(7,2) AS atingimento_atendimentos_percentual
+FROM vendedores v
+JOIN competencias c ON c.vendedor_id = v.id
+LEFT JOIN atendimentos_mes am ON am.vendedor_id = v.id AND am.competencia = c.competencia
+LEFT JOIN pedidos_mes pm ON pm.vendedor_id = v.id AND pm.competencia = c.competencia
+LEFT JOIN metas_vendedores mv
+  ON mv.vendedor_id = v.id
+ AND mv.competencia = c.competencia
+WHERE v.ativo = true;
+
+CREATE OR REPLACE VIEW vw_ranking_vendedores AS
+SELECT
+  d.*,
+  DENSE_RANK() OVER (PARTITION BY d.competencia ORDER BY d.taxa_conversao_percentual DESC, d.receita_total DESC) AS ranking_conversao,
+  DENSE_RANK() OVER (PARTITION BY d.competencia ORDER BY d.margem_media_percentual DESC, d.receita_total DESC) AS ranking_margem,
+  DENSE_RANK() OVER (PARTITION BY d.competencia ORDER BY d.receita_total DESC, d.pedidos_convertidos DESC) AS ranking_faturamento
+FROM vw_desempenho_vendedores d;
+
 CREATE OR REPLACE VIEW vw_estoque_disponibilidade AS
 SELECT
   e.sku,
@@ -2137,6 +2285,18 @@ EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS trg_campanhas_comerciais_updated_at ON campanhas_comerciais;
 CREATE TRIGGER trg_campanhas_comerciais_updated_at
 BEFORE UPDATE ON campanhas_comerciais
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_metas_vendedores_updated_at ON metas_vendedores;
+CREATE TRIGGER trg_metas_vendedores_updated_at
+BEFORE UPDATE ON metas_vendedores
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_comissoes_vendedores_updated_at ON comissoes_vendedores;
+CREATE TRIGGER trg_comissoes_vendedores_updated_at
+BEFORE UPDATE ON comissoes_vendedores
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
