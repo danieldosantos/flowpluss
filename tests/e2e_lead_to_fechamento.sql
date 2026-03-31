@@ -8,8 +8,32 @@ DECLARE
   v_pedido_id uuid;
   v_lead_perdido_id uuid;
   v_alertas integer;
+  v_reserva_qtd integer;
+  v_curva_sku text;
+  v_alerta_ruptura integer;
   v_txid text := 'e2e-txid-' || substring(md5(clock_timestamp()::text) from 1 for 12);
 BEGIN
+  INSERT INTO estoque (sku, descricao, categoria, quantidade_disponivel, estoque_minimo, preco_unitario, ativo)
+  VALUES
+    ('E2E-001', 'Pastilha de Freio E2E', 'freio', 10, 3, 75.00, true),
+    ('E2E-002', 'Pastilha de Freio Equivalente E2E', 'freio', 8, 2, 72.00, true),
+    ('E2E-003', 'Filtro de Óleo E2E', 'motor', 0, 4, 25.00, true)
+  ON CONFLICT (sku) DO UPDATE
+    SET descricao = EXCLUDED.descricao,
+        categoria = EXCLUDED.categoria,
+        quantidade_disponivel = EXCLUDED.quantidade_disponivel,
+        estoque_minimo = EXCLUDED.estoque_minimo,
+        preco_unitario = EXCLUDED.preco_unitario,
+        ativo = true,
+        updated_at = now();
+
+  INSERT INTO estoque_equivalencias (sku_origem, sku_equivalente, prioridade, ativo)
+  VALUES ('E2E-001', 'E2E-002', 1, true)
+  ON CONFLICT (sku_origem, sku_equivalente) DO UPDATE
+    SET prioridade = EXCLUDED.prioridade,
+        ativo = true,
+        updated_at = now();
+
   INSERT INTO leads (telefone, nome, itens_interesse, status)
   VALUES ('5511999999999', 'Lead E2E', '[{"sku":"E2E-001","qtd":2}]'::jsonb, 'lead_qualificado_bot')
   RETURNING id INTO v_lead_id;
@@ -23,9 +47,26 @@ BEGIN
   VALUES (v_lead_id, v_vendedor_id, 'em_atendimento_humano', 'whatsapp', 'Teste E2E obrigatório')
   RETURNING id INTO v_atendimento_id;
 
-  INSERT INTO pedidos (atendimento_id, total, status)
-  VALUES (v_atendimento_id, 150.75, 'rascunho')
+  INSERT INTO pedidos (atendimento_id, itens, subtotal, total, status)
+  VALUES (
+    v_atendimento_id,
+    '[{"sku":"E2E-001","qtd":2,"preco_unitario":75.00}]'::jsonb,
+    150.00,
+    150.00,
+    'rascunho'
+  )
   RETURNING id INTO v_pedido_id;
+
+  SELECT quantidade
+    INTO v_reserva_qtd
+  FROM estoque_reservas
+  WHERE pedido_id = v_pedido_id
+    AND sku = 'E2E-001'
+    AND status = 'ativa';
+
+  IF COALESCE(v_reserva_qtd, 0) <> 2 THEN
+    RAISE EXCEPTION 'E2E CRM falhou: reserva de estoque não criada ao montar proposta';
+  END IF;
 
   UPDATE pedidos
   SET pix_txid = v_txid,
@@ -39,6 +80,16 @@ BEGIN
       pago_em = now(),
       updated_at = now()
   WHERE id = v_pedido_id;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM estoque_reservas
+    WHERE pedido_id = v_pedido_id
+      AND sku = 'E2E-001'
+      AND status = 'consumida'
+  ) THEN
+    RAISE EXCEPTION 'E2E CRM falhou: reserva não foi consumida após pagamento';
+  END IF;
 
   UPDATE pedidos
   SET status = 'fechado',
@@ -90,6 +141,34 @@ BEGIN
 
   IF v_alertas < 1 THEN
     RAISE EXCEPTION 'E2E CRM falhou: vw_alertas_gerente não sinalizou pedido pendente';
+  END IF;
+
+  SELECT curva_abc
+    INTO v_curva_sku
+  FROM vw_curva_abc_giro_sku
+  WHERE sku = 'E2E-001';
+
+  IF v_curva_sku IS NULL THEN
+    RAISE EXCEPTION 'E2E CRM falhou: curva ABC/giro por SKU não retornou dados';
+  END IF;
+
+  INSERT INTO leads (telefone, nome, itens_interesse, status, motivo_perda)
+  VALUES (
+    '5511555555555',
+    'Lead sem estoque E2E',
+    '[{"sku":"E2E-003","qtd":1}]'::jsonb,
+    'perdido_nao_convertido',
+    'sem_estoque'
+  );
+
+  SELECT count(*)
+    INTO v_alerta_ruptura
+  FROM vw_alerta_ruptura_estoque
+  WHERE sku = 'E2E-003'
+    AND severidade IN ('ruptura', 'risco_ruptura');
+
+  IF v_alerta_ruptura < 1 THEN
+    RAISE EXCEPTION 'E2E CRM falhou: alerta de ruptura com impacto não retornou para SKU sem estoque';
   END IF;
 END $$;
 
