@@ -156,6 +156,26 @@ CREATE TABLE IF NOT EXISTS pedidos (
     CHECK (status <> 'fechado' OR pago_em IS NOT NULL)
 );
 
+CREATE TABLE IF NOT EXISTS conciliacoes_pix (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  pedido_id uuid NOT NULL REFERENCES pedidos(id) ON DELETE CASCADE,
+  pix_txid text NOT NULL,
+  valor_cobrado numeric(14,2) NOT NULL,
+  valor_pago numeric(14,2) NOT NULL,
+  tolerancia_abs numeric(14,2) NOT NULL DEFAULT 0.50,
+  diferenca_valor numeric(14,2) NOT NULL,
+  status_conciliacao text NOT NULL DEFAULT 'pendente',
+  pago_em timestamptz NOT NULL DEFAULT now(),
+  payload_gateway jsonb NOT NULL DEFAULT '{}'::jsonb,
+  conciliado_por text NOT NULL DEFAULT 'system',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ck_conciliacoes_pix_status_valido
+    CHECK (status_conciliacao IN ('conciliado', 'divergente', 'pendente')),
+  CONSTRAINT ck_conciliacoes_pix_valores_nao_negativos
+    CHECK (valor_cobrado >= 0 AND valor_pago >= 0 AND tolerancia_abs >= 0)
+);
+
 CREATE TABLE IF NOT EXISTS estoque_reservas (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   pedido_id uuid NOT NULL REFERENCES pedidos(id) ON DELETE CASCADE,
@@ -188,6 +208,35 @@ CREATE TABLE IF NOT EXISTS status_log (
   detalhes jsonb NOT NULL DEFAULT '{}'::jsonb
 );
 
+CREATE TABLE IF NOT EXISTS auditoria_comercial (
+  id bigserial PRIMARY KEY,
+  entidade text NOT NULL CHECK (entidade IN ('pedidos', 'estoque')),
+  entidade_id uuid NOT NULL,
+  campo text NOT NULL,
+  valor_anterior text,
+  valor_novo text,
+  alterado_por text NOT NULL DEFAULT 'system',
+  data_evento timestamptz NOT NULL DEFAULT now(),
+  detalhes jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE TABLE IF NOT EXISTS regua_cobranca (
+  id bigserial PRIMARY KEY,
+  pedido_id uuid NOT NULL REFERENCES pedidos(id) ON DELETE CASCADE,
+  etapa smallint NOT NULL,
+  canal text NOT NULL DEFAULT 'whatsapp',
+  template text NOT NULL,
+  agendado_para timestamptz NOT NULL,
+  executado_em timestamptz,
+  status text NOT NULL DEFAULT 'pendente',
+  observacoes text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ck_regua_cobranca_etapa_valida CHECK (etapa BETWEEN 1 AND 5),
+  CONSTRAINT ck_regua_cobranca_status_valido CHECK (status IN ('pendente', 'enviado', 'cancelado', 'erro')),
+  CONSTRAINT uk_regua_cobranca_etapa UNIQUE (pedido_id, etapa)
+);
+
 CREATE TABLE IF NOT EXISTS pipeline_etapas (
   id bigserial PRIMARY KEY,
   entidade text NOT NULL CHECK (entidade IN ('leads', 'atendimentos', 'pedidos')),
@@ -213,6 +262,10 @@ CREATE INDEX IF NOT EXISTS idx_estoque_qtd ON estoque(quantidade_disponivel);
 CREATE INDEX IF NOT EXISTS idx_estoque_equivalencias_origem ON estoque_equivalencias(sku_origem, ativo, prioridade);
 CREATE INDEX IF NOT EXISTS idx_estoque_reservas_lookup ON estoque_reservas(pedido_id, status, sku);
 CREATE INDEX IF NOT EXISTS idx_status_log_entidade_evento ON status_log(entidade, entidade_id, data_evento DESC);
+CREATE INDEX IF NOT EXISTS idx_conciliacoes_pix_txid ON conciliacoes_pix(pix_txid, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_conciliacoes_pix_status ON conciliacoes_pix(status_conciliacao, pago_em DESC);
+CREATE INDEX IF NOT EXISTS idx_auditoria_comercial_busca ON auditoria_comercial(entidade, entidade_id, data_evento DESC);
+CREATE INDEX IF NOT EXISTS idx_regua_cobranca_status_agenda ON regua_cobranca(status, agendado_para);
 CREATE INDEX IF NOT EXISTS idx_pipeline_etapas_lookup ON pipeline_etapas(entidade, etapa, ativo);
 CREATE INDEX IF NOT EXISTS idx_leads_sla_monitoria ON leads(status, etapa_entrada_em, ultimo_retorno_em);
 CREATE INDEX IF NOT EXISTS idx_pedidos_sla_monitoria ON pedidos(status, etapa_entrada_em, ultimo_retorno_em);
@@ -250,6 +303,42 @@ BEGIN
       COALESCE(current_setting('app.user', true), 'system'),
       jsonb_build_object('trigger_op', TG_OP)
     );
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION log_auditoria_comercial()
+RETURNS trigger AS $$
+DECLARE
+  v_usuario text := COALESCE(current_setting('app.user', true), 'system');
+BEGIN
+  IF TG_TABLE_NAME = 'pedidos' THEN
+    IF NEW.status IS DISTINCT FROM OLD.status THEN
+      INSERT INTO auditoria_comercial(entidade, entidade_id, campo, valor_anterior, valor_novo, alterado_por, detalhes)
+      VALUES ('pedidos', NEW.id, 'status', OLD.status::text, NEW.status::text, v_usuario, jsonb_build_object('trigger_op', TG_OP));
+    END IF;
+
+    IF NEW.descontos IS DISTINCT FROM OLD.descontos THEN
+      INSERT INTO auditoria_comercial(entidade, entidade_id, campo, valor_anterior, valor_novo, alterado_por, detalhes)
+      VALUES ('pedidos', NEW.id, 'descontos', OLD.descontos::text, NEW.descontos::text, v_usuario, jsonb_build_object('trigger_op', TG_OP));
+    END IF;
+
+    IF NEW.subtotal IS DISTINCT FROM OLD.subtotal THEN
+      INSERT INTO auditoria_comercial(entidade, entidade_id, campo, valor_anterior, valor_novo, alterado_por, detalhes)
+      VALUES ('pedidos', NEW.id, 'subtotal', OLD.subtotal::text, NEW.subtotal::text, v_usuario, jsonb_build_object('trigger_op', TG_OP));
+    END IF;
+
+    IF NEW.total IS DISTINCT FROM OLD.total THEN
+      INSERT INTO auditoria_comercial(entidade, entidade_id, campo, valor_anterior, valor_novo, alterado_por, detalhes)
+      VALUES ('pedidos', NEW.id, 'total', OLD.total::text, NEW.total::text, v_usuario, jsonb_build_object('trigger_op', TG_OP));
+    END IF;
+  ELSIF TG_TABLE_NAME = 'estoque' THEN
+    IF NEW.preco_unitario IS DISTINCT FROM OLD.preco_unitario THEN
+      INSERT INTO auditoria_comercial(entidade, entidade_id, campo, valor_anterior, valor_novo, alterado_por, detalhes)
+      VALUES ('estoque', NEW.id, 'preco_unitario', OLD.preco_unitario::text, NEW.preco_unitario::text, v_usuario, jsonb_build_object('sku', NEW.sku, 'trigger_op', TG_OP));
+    END IF;
   END IF;
 
   RETURN NEW;
@@ -401,6 +490,98 @@ RETURNS trigger AS $$
 BEGIN
   PERFORM refresh_reservas_pedido(NEW.id);
   RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION gerar_regua_cobranca_padrao(p_pedido_id uuid, p_base timestamptz)
+RETURNS void AS $$
+BEGIN
+  INSERT INTO regua_cobranca (pedido_id, etapa, canal, template, agendado_para, status)
+  VALUES
+    (p_pedido_id, 1, 'whatsapp', 'cobranca_d0', COALESCE(p_base, now()), 'pendente'),
+    (p_pedido_id, 2, 'whatsapp', 'cobranca_d1', COALESCE(p_base, now()) + interval '1 day', 'pendente'),
+    (p_pedido_id, 3, 'whatsapp', 'cobranca_d3', COALESCE(p_base, now()) + interval '3 days', 'pendente'),
+    (p_pedido_id, 4, 'whatsapp', 'cobranca_d7', COALESCE(p_base, now()) + interval '7 days', 'pendente'),
+    (p_pedido_id, 5, 'humano', 'escalonamento_financeiro', COALESCE(p_base, now()) + interval '10 days', 'pendente')
+  ON CONFLICT (pedido_id, etapa) DO UPDATE
+  SET agendado_para = EXCLUDED.agendado_para,
+      template = EXCLUDED.template,
+      canal = EXCLUDED.canal,
+      status = CASE
+        WHEN regua_cobranca.status IN ('enviado', 'cancelado') THEN regua_cobranca.status
+        ELSE 'pendente'
+      END,
+      updated_at = now();
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION trg_sync_regua_cobranca()
+RETURNS trigger AS $$
+BEGIN
+  IF NEW.status = 'aguardando_pagamento' THEN
+    PERFORM gerar_regua_cobranca_padrao(NEW.id, NEW.etapa_entrada_em);
+  ELSE
+    UPDATE regua_cobranca
+    SET status = 'cancelado',
+        updated_at = now()
+    WHERE pedido_id = NEW.id
+      AND status = 'pendente';
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION conciliar_pix_automatico(
+  p_pix_txid text,
+  p_valor_pago numeric,
+  p_pago_em timestamptz DEFAULT now(),
+  p_tolerancia_abs numeric DEFAULT 0.50,
+  p_payload_gateway jsonb DEFAULT '{}'::jsonb
+)
+RETURNS uuid AS $$
+DECLARE
+  v_pedido pedidos%ROWTYPE;
+  v_diff numeric(14,2);
+  v_status text;
+  v_conciliacao_id uuid;
+  v_usuario text := COALESCE(current_setting('app.user', true), 'system');
+BEGIN
+  SELECT *
+    INTO v_pedido
+  FROM pedidos
+  WHERE pix_txid = p_pix_txid
+  ORDER BY updated_at DESC
+  LIMIT 1;
+
+  IF v_pedido.id IS NULL THEN
+    RAISE EXCEPTION 'Nenhum pedido encontrado para txid %', p_pix_txid;
+  END IF;
+
+  v_diff := round(abs(COALESCE(v_pedido.total, 0) - COALESCE(p_valor_pago, 0)), 2);
+  v_status := CASE WHEN v_diff <= COALESCE(p_tolerancia_abs, 0.50) THEN 'conciliado' ELSE 'divergente' END;
+
+  INSERT INTO conciliacoes_pix (
+    pedido_id, pix_txid, valor_cobrado, valor_pago, tolerancia_abs, diferenca_valor,
+    status_conciliacao, pago_em, payload_gateway, conciliado_por
+  )
+  VALUES (
+    v_pedido.id, p_pix_txid, COALESCE(v_pedido.total, 0), COALESCE(p_valor_pago, 0), COALESCE(p_tolerancia_abs, 0.50), v_diff,
+    v_status, COALESCE(p_pago_em, now()), COALESCE(p_payload_gateway, '{}'::jsonb), v_usuario
+  )
+  RETURNING id INTO v_conciliacao_id;
+
+  IF v_status = 'conciliado' THEN
+    UPDATE pedidos
+    SET status = 'pago',
+        pago_em = COALESCE(p_pago_em, now()),
+        ultimo_retorno_em = now(),
+        updated_at = now()
+    WHERE id = v_pedido.id
+      AND status IN ('aguardando_pagamento', 'aguardando_conferencia', 'rascunho');
+  END IF;
+
+  RETURN v_conciliacao_id;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -562,6 +743,38 @@ GROUP BY
 HAVING d.quantidade_livre <= 0
    OR d.quantidade_livre < GREATEST(e.estoque_minimo, COALESCE(dm.demanda_mensal_estimada, 0));
 
+CREATE OR REPLACE VIEW vw_inadimplencia_pedidos AS
+WITH ult_cobranca AS (
+  SELECT DISTINCT ON (r.pedido_id)
+    r.pedido_id,
+    r.etapa,
+    r.status AS status_cobranca,
+    r.agendado_para,
+    r.executado_em
+  FROM regua_cobranca r
+  ORDER BY r.pedido_id, r.etapa DESC
+)
+SELECT
+  p.id AS pedido_id,
+  p.atendimento_id,
+  p.status,
+  p.total,
+  p.etapa_entrada_em AS inicio_espera_pagamento,
+  EXTRACT(EPOCH FROM (now() - p.etapa_entrada_em)) / 3600.0 AS horas_em_aberto,
+  COALESCE(uc.etapa, 0) AS ultima_etapa_cobranca,
+  uc.status_cobranca,
+  uc.agendado_para AS proxima_acao_cobranca_em,
+  CASE
+    WHEN p.status <> 'aguardando_pagamento' THEN 'adimplente'
+    WHEN now() - p.etapa_entrada_em < interval '24 hours' THEN 'risco_baixo'
+    WHEN now() - p.etapa_entrada_em < interval '72 hours' THEN 'risco_moderado'
+    ELSE 'inadimplente'
+  END AS nivel_inadimplencia
+FROM pedidos p
+LEFT JOIN ult_cobranca uc
+  ON uc.pedido_id = p.id
+WHERE p.status IN ('aguardando_pagamento', 'pago', 'fechado');
+
 DROP TRIGGER IF EXISTS trg_leads_updated_at ON leads;
 CREATE TRIGGER trg_leads_updated_at
 BEFORE UPDATE ON leads
@@ -604,6 +817,12 @@ BEFORE UPDATE ON estoque
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_estoque_auditoria_comercial ON estoque;
+CREATE TRIGGER trg_estoque_auditoria_comercial
+AFTER UPDATE OF preco_unitario ON estoque
+FOR EACH ROW
+EXECUTE FUNCTION log_auditoria_comercial();
+
 DROP TRIGGER IF EXISTS trg_estoque_equivalencias_updated_at ON estoque_equivalencias;
 CREATE TRIGGER trg_estoque_equivalencias_updated_at
 BEFORE UPDATE ON estoque_equivalencias
@@ -640,11 +859,23 @@ AFTER INSERT OR UPDATE ON pedidos
 FOR EACH ROW
 EXECUTE FUNCTION log_status_change();
 
+DROP TRIGGER IF EXISTS trg_pedidos_auditoria_comercial ON pedidos;
+CREATE TRIGGER trg_pedidos_auditoria_comercial
+AFTER UPDATE OF status, subtotal, descontos, total ON pedidos
+FOR EACH ROW
+EXECUTE FUNCTION log_auditoria_comercial();
+
 DROP TRIGGER IF EXISTS trg_pedidos_refresh_reservas ON pedidos;
 CREATE TRIGGER trg_pedidos_refresh_reservas
 AFTER INSERT OR UPDATE OF itens, status ON pedidos
 FOR EACH ROW
 EXECUTE FUNCTION trg_refresh_reservas_pedido();
+
+DROP TRIGGER IF EXISTS trg_pedidos_sync_regua_cobranca ON pedidos;
+CREATE TRIGGER trg_pedidos_sync_regua_cobranca
+AFTER INSERT OR UPDATE OF status, etapa_entrada_em ON pedidos
+FOR EACH ROW
+EXECUTE FUNCTION trg_sync_regua_cobranca();
 
 INSERT INTO pipeline_etapas (entidade, etapa, probabilidade_padrao, sla_minutos, alerta_gerente)
 VALUES

@@ -17,6 +17,7 @@ Este projeto agora inclui os artefatos necessários para implantar o blueprint c
 - [x] Criar dashboards operacionais (aba de Operação com KPIs).
 - [x] Publicar base para alertas/métricas via `status_log` e consultas SQL.
 - [x] Prioridade 3 de estoque: reserva automática ao montar proposta, cross-reference de equivalentes, curva ABC/giro por SKU e alerta de ruptura com impacto em vendas perdidas.
+- [x] Prioridade 4 de financeiro/compliance: conciliação PIX automática com tolerância, régua de cobrança para inadimplência e trilha de auditoria expandida de preço/desconto/status.
 
 ## Como aplicar
 
@@ -101,6 +102,15 @@ Este projeto agora inclui os artefatos necessários para implantar o blueprint c
 - A chave PIX oficial (`02445780012`) é fixada no schema de vendedores e usada no fluxo de cobrança.
 - Pedido fechado exige pagamento (`ck_pedido_fechado_precisa_pago`).
 - Mudanças de status são auditadas automaticamente por trigger (`log_status_change`).
+- Trilhas de compliance financeiras:
+  - `conciliar_pix_automatico(...)` registra conciliações em `conciliacoes_pix` e marca pedido como `pago` quando a diferença está dentro da tolerância.
+  - `regua_cobranca` agenda automaticamente as etapas D+0, D+1, D+3, D+7 e escalonamento humano (D+10) para pedidos em `aguardando_pagamento`.
+  - `vw_inadimplencia_pedidos` classifica risco (`risco_baixo`, `risco_moderado`, `inadimplente`) e mostra etapa de cobrança mais recente.
+- Auditoria comercial expandida em `auditoria_comercial` para rastrear **quem alterou**:
+  - `pedidos.status`
+  - `pedidos.descontos`
+  - `pedidos.subtotal`/`pedidos.total`
+  - `estoque.preco_unitario`
 - Pipeline comercial profissional em `pipeline_etapas` com probabilidade padrão por estágio e SLA por etapa.
 - Motivo de perda obrigatório no lead perdido (`perdido_preco`, `sem_estoque`, `sem_retorno`, `comprou_concorrente`).
 - Alertas para gerente disponíveis na view `vw_alertas_gerente` (`lead_parado`, `pedido_sem_retorno`, `pagamento_pendente`).

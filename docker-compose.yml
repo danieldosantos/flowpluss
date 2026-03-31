@@ -60,8 +60,8 @@ services:
       SERVER_TYPE: http
       SERVER_PORT: 8080
       SERVER_URL: http://evolution-api:8080
-      SERVER_DISABLE_DOCS: "false"
-      SERVER_DISABLE_MANAGER: "false"
+      SERVER_DISABLE_DOCS: "true"
+      SERVER_DISABLE_MANAGER: "true"
 
       CORS_ORIGIN: "*"
       CORS_METHODS: POST,GET,OPTIONS
