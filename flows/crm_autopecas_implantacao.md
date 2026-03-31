@@ -16,6 +16,7 @@ Este projeto agora inclui os artefatos necessários para implantar o blueprint c
 - [x] Implementar geração de recibo provisório e mensagem de recibo definitivo.
 - [x] Criar dashboards operacionais (aba de Operação com KPIs).
 - [x] Publicar base para alertas/métricas via `status_log` e consultas SQL.
+- [x] Prioridade 3 de estoque: reserva automática ao montar proposta, cross-reference de equivalentes, curva ABC/giro por SKU e alerta de ruptura com impacto em vendas perdidas.
 
 ## Como aplicar
 
@@ -103,6 +104,11 @@ Este projeto agora inclui os artefatos necessários para implantar o blueprint c
 - Pipeline comercial profissional em `pipeline_etapas` com probabilidade padrão por estágio e SLA por etapa.
 - Motivo de perda obrigatório no lead perdido (`perdido_preco`, `sem_estoque`, `sem_retorno`, `comprou_concorrente`).
 - Alertas para gerente disponíveis na view `vw_alertas_gerente` (`lead_parado`, `pedido_sem_retorno`, `pagamento_pendente`).
+- Inteligência de estoque disponível nas views:
+  - `vw_estoque_disponibilidade` (livre x reservado por SKU).
+  - `vw_sugestoes_equivalentes` (cross-reference para sugestão de item equivalente).
+  - `vw_curva_abc_giro_sku` (classificação ABC + giro mensal estimado por SKU).
+  - `vw_alerta_ruptura_estoque` (ruptura/risco com estimativa de receita perdida).
 
 
 ## Fluxo único + menu principal (novo)
