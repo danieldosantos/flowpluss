@@ -46,6 +46,11 @@ O schema já contempla o bloco de **pós-venda e retenção** (alta prioridade),
 - agenda de manutenção periódica por cliente/frota;
 - segmentação de retenção para campanhas de recompra.
 
+Também contempla o bloco **Fiscal/ERP** (alta prioridade), com:
+- documentos fiscais de NFe/NFCe (status, eventos, XML/PDF e chave de acesso);
+- contas a receber/pagar com visão de inadimplência além do PIX operacional;
+- fila de integração ERP e lançamentos contábeis para sincronização assíncrona.
+
 Fluxo recomendado:
 1. Aplicar o SQL no PostgreSQL.
 2. Importar o flow completo no Node-RED.
