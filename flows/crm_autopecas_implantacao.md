@@ -104,7 +104,7 @@ Este projeto agora inclui os artefatos necessários para implantar o blueprint c
 
 ## Observações de negócio implementadas
 
-- A chave PIX oficial (`02445780012`) é fixada no schema de vendedores e usada no fluxo de cobrança.
+- A chave PIX é configurável por vendedor/pedido/atendimento e pode usar fallback por ambiente (`PIX_CHAVE_PADRAO`) para suportar múltiplos CNPJs, filiais e contas de recebimento.
 - Pedido fechado exige pagamento (`ck_pedido_fechado_precisa_pago`).
 - Mudanças de status são auditadas automaticamente por trigger (`log_status_change`).
 - Trilhas de compliance financeiras:

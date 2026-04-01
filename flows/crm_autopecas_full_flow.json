@@ -330,7 +330,7 @@
     "type": "function",
     "z": "crm_tab_unificado",
     "name": "Valida total pedido",
-    "func": "const total = Number(msg.total || msg.pedido?.total || 0);\nif (!(total > 0)) {\n  node.error('Total inválido para gerar PIX', msg);\n  return null;\n}\nmsg.pix = {\n  chave: '02445780012',\n  valor: total.toFixed(2),\n  descricao: `Pedido ${msg.pedido?.id || ''}`\n};\nreturn msg;",
+    "func": "const total = Number(msg.total || msg.pedido?.total || 0);\nif (!(total > 0)) {\n  node.error('Total inválido para gerar PIX', msg);\n  return null;\n}\nconst pixChave =\n  msg.pix_chave ||\n  msg.pedido?.pix_chave ||\n  msg.atendimento?.pix_chave ||\n  msg.vendedor?.pix_chave_valor ||\n  flow.get('pix_chave_padrao') ||\n  env.get('PIX_CHAVE_PADRAO');\nif (!pixChave) {\n  node.error('Chave PIX ausente. Defina por pedido/atendimento/vendedor ou PIX_CHAVE_PADRAO.', msg);\n  return null;\n}\nmsg.pix = {\n  chave: String(pixChave).trim(),\n  tipo: msg.pix_tipo || msg.vendedor?.pix_chave_tipo || flow.get('pix_tipo_padrao') || env.get('PIX_TIPO_PADRAO') || 'cpf',\n  valor: total.toFixed(2),\n  descricao: `Pedido ${msg.pedido?.id || ''}`\n};\nreturn msg;",
     "outputs": 1,
     "x": 440,
     "y": 80,
