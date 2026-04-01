@@ -2,6 +2,38 @@
 
 Guia completo para subir a stack **sem erros** (Node-RED + Evolution API + Redis + PostgreSQL + webhook-gateway).
 
+## 🚀 Setup automatizado (do zero)
+
+Para subir o projeto do zero com um comando, use:
+
+```bash
+AUTO_YES=1 ./scripts/setup_do_zero.sh
+```
+
+### Opções úteis
+
+- **Reset total de dados locais (volumes Docker):**
+
+```bash
+AUTO_YES=1 RESET_VOLUMES=1 ./scripts/setup_do_zero.sh
+```
+
+- **Modo interativo (confirma antes de apagar volumes):**
+
+```bash
+./scripts/setup_do_zero.sh
+```
+
+O script automatiza:
+1. validação de `docker`/`docker compose`;
+2. criação do `.env` a partir de `.envexemplo` (se não existir);
+3. validação das variáveis essenciais no `.env`;
+4. `docker compose down` (ou `down -v` com reset);
+5. `docker compose up -d --build`;
+6. checagem de disponibilidade do Node-RED e Evolution API.
+
+---
+
 ## 1) O que este projeto sobe
 
 Serviços do `docker-compose.yml`:
