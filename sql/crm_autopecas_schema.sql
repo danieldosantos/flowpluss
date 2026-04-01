@@ -101,8 +101,34 @@ BEGIN
   END IF;
 END$$;
 
+CREATE TABLE IF NOT EXISTS empresas (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  codigo text NOT NULL UNIQUE,
+  nome text NOT NULL,
+  documento text,
+  ativa boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS filiais (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id uuid NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+  codigo text NOT NULL,
+  nome text NOT NULL,
+  cidade text,
+  estado text,
+  ativa boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT uk_filiais_empresa_codigo UNIQUE (empresa_id, codigo),
+  CONSTRAINT uk_filiais_id_empresa UNIQUE (id, empresa_id)
+);
+
 CREATE TABLE IF NOT EXISTS leads (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id uuid NOT NULL,
+  filial_id uuid NOT NULL,
   nome text,
   empresa text,
   telefone text NOT NULL UNIQUE,
@@ -127,7 +153,9 @@ CREATE TABLE IF NOT EXISTS leads (
     CHECK (
       (status = 'perdido_nao_convertido' AND motivo_perda IS NOT NULL)
       OR (status <> 'perdido_nao_convertido' AND motivo_perda IS NULL)
-    )
+    ),
+  CONSTRAINT fk_leads_empresa FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+  CONSTRAINT fk_leads_filial_empresa FOREIGN KEY (filial_id, empresa_id) REFERENCES filiais(id, empresa_id)
 );
 
 CREATE TABLE IF NOT EXISTS vendedores (
@@ -145,6 +173,8 @@ CREATE TABLE IF NOT EXISTS vendedores (
 
 CREATE TABLE IF NOT EXISTS atendimentos (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id uuid NOT NULL,
+  filial_id uuid NOT NULL,
   lead_id uuid NOT NULL REFERENCES leads(id),
   vendedor_id uuid REFERENCES vendedores(id),
   status crm_status NOT NULL DEFAULT 'aguardando_transferencia_humano',
@@ -153,7 +183,9 @@ CREATE TABLE IF NOT EXISTS atendimentos (
   canal text NOT NULL DEFAULT 'whatsapp',
   observacoes text,
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT fk_atendimentos_empresa FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+  CONSTRAINT fk_atendimentos_filial_empresa FOREIGN KEY (filial_id, empresa_id) REFERENCES filiais(id, empresa_id)
 );
 
 CREATE TABLE IF NOT EXISTS estoque (
@@ -230,6 +262,8 @@ CREATE TABLE IF NOT EXISTS estoque_aplicacoes (
 
 CREATE TABLE IF NOT EXISTS pedidos (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id uuid NOT NULL,
+  filial_id uuid NOT NULL,
   atendimento_id uuid NOT NULL REFERENCES atendimentos(id),
   cliente_nome text,
   cliente_empresa text,
@@ -247,7 +281,9 @@ CREATE TABLE IF NOT EXISTS pedidos (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT ck_pedido_fechado_precisa_pago
-    CHECK (status <> 'fechado' OR pago_em IS NOT NULL)
+    CHECK (status <> 'fechado' OR pago_em IS NOT NULL),
+  CONSTRAINT fk_pedidos_empresa FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+  CONSTRAINT fk_pedidos_filial_empresa FOREIGN KEY (filial_id, empresa_id) REFERENCES filiais(id, empresa_id)
 );
 
 CREATE TABLE IF NOT EXISTS fiscal_documentos (
@@ -777,9 +813,89 @@ CREATE TABLE IF NOT EXISTS automacoes_reativacao (
   CONSTRAINT ck_automacoes_reativacao_canal_valido CHECK (canal_preferencial IN ('whatsapp', 'telefone', 'email', 'instagram', 'facebook', 'telegram', 'site_chat', 'sms'))
 );
 
+ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS empresa_id uuid;
+ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS filial_id uuid;
+ALTER TABLE IF EXISTS atendimentos ADD COLUMN IF NOT EXISTS empresa_id uuid;
+ALTER TABLE IF EXISTS atendimentos ADD COLUMN IF NOT EXISTS filial_id uuid;
+ALTER TABLE IF EXISTS pedidos ADD COLUMN IF NOT EXISTS empresa_id uuid;
+ALTER TABLE IF EXISTS pedidos ADD COLUMN IF NOT EXISTS filial_id uuid;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'fk_leads_empresa'
+      AND conrelid = 'leads'::regclass
+  ) THEN
+    ALTER TABLE leads
+      ADD CONSTRAINT fk_leads_empresa
+      FOREIGN KEY (empresa_id) REFERENCES empresas(id);
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'fk_leads_filial_empresa'
+      AND conrelid = 'leads'::regclass
+  ) THEN
+    ALTER TABLE leads
+      ADD CONSTRAINT fk_leads_filial_empresa
+      FOREIGN KEY (filial_id, empresa_id) REFERENCES filiais(id, empresa_id);
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'fk_atendimentos_empresa'
+      AND conrelid = 'atendimentos'::regclass
+  ) THEN
+    ALTER TABLE atendimentos
+      ADD CONSTRAINT fk_atendimentos_empresa
+      FOREIGN KEY (empresa_id) REFERENCES empresas(id);
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'fk_atendimentos_filial_empresa'
+      AND conrelid = 'atendimentos'::regclass
+  ) THEN
+    ALTER TABLE atendimentos
+      ADD CONSTRAINT fk_atendimentos_filial_empresa
+      FOREIGN KEY (filial_id, empresa_id) REFERENCES filiais(id, empresa_id);
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'fk_pedidos_empresa'
+      AND conrelid = 'pedidos'::regclass
+  ) THEN
+    ALTER TABLE pedidos
+      ADD CONSTRAINT fk_pedidos_empresa
+      FOREIGN KEY (empresa_id) REFERENCES empresas(id);
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'fk_pedidos_filial_empresa'
+      AND conrelid = 'pedidos'::regclass
+  ) THEN
+    ALTER TABLE pedidos
+      ADD CONSTRAINT fk_pedidos_filial_empresa
+      FOREIGN KEY (filial_id, empresa_id) REFERENCES filiais(id, empresa_id);
+  END IF;
+END$$;
+
 CREATE INDEX IF NOT EXISTS idx_leads_status_created_at ON leads(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_filiais_empresa_ativa ON filiais(empresa_id, ativa);
+CREATE INDEX IF NOT EXISTS idx_leads_empresa_filial_status ON leads(empresa_id, filial_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_atendimentos_status_created_at ON atendimentos(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_atendimentos_empresa_filial_status ON atendimentos(empresa_id, filial_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_pedidos_status_created_at ON pedidos(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pedidos_empresa_filial_status ON pedidos(empresa_id, filial_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_pedidos_pagamento ON pedidos(status, pago_em DESC);
 CREATE INDEX IF NOT EXISTS idx_estoque_qtd ON estoque(quantidade_disponivel);
 CREATE INDEX IF NOT EXISTS idx_estoque_equivalencias_origem ON estoque_equivalencias(sku_origem, ativo, prioridade);
@@ -2135,6 +2251,18 @@ $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS trg_leads_updated_at ON leads;
 CREATE TRIGGER trg_leads_updated_at
 BEFORE UPDATE ON leads
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_empresas_updated_at ON empresas;
+CREATE TRIGGER trg_empresas_updated_at
+BEFORE UPDATE ON empresas
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_filiais_updated_at ON filiais;
+CREATE TRIGGER trg_filiais_updated_at
+BEFORE UPDATE ON filiais
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
