@@ -164,11 +164,13 @@ CREATE TABLE IF NOT EXISTS vendedores (
   telefone text NOT NULL UNIQUE,
   ativo boolean NOT NULL,
   pix_chave_tipo text NOT NULL DEFAULT 'cpf',
-  pix_chave_valor text NOT NULL DEFAULT '02445780012',
+  pix_chave_valor text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT ck_vendedores_pix_oficial
-    CHECK (pix_chave_tipo = 'cpf' AND pix_chave_valor = '02445780012')
+  CONSTRAINT ck_vendedores_pix_tipo_valido
+    CHECK (pix_chave_tipo IN ('cpf', 'cnpj', 'email', 'telefone', 'aleatoria')),
+  CONSTRAINT ck_vendedores_pix_chave_preenchida
+    CHECK (length(trim(pix_chave_valor)) >= 3)
 );
 
 CREATE TABLE IF NOT EXISTS atendimentos (

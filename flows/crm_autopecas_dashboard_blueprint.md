@@ -69,12 +69,12 @@ Implementar um CRM de atendimento para autopeças com:
 - `nome`
 - `telefone`
 - `ativo` (bool)
-- `pix_chave_tipo` (cpf)
-- `pix_chave_valor` (`02445780012`)
+- `pix_chave_tipo` (cpf/cnpj/email/telefone/aleatória)
+- `pix_chave_valor` (chave por empresa/filial/vendedor)
 - `created_at`
 - `updated_at`
 
-> Regra: mesmo havendo cadastro por vendedor, a chave PIX usada na cobrança é a chave oficial da empresa `02445780012`.
+> Regra: a cobrança usa a chave PIX resolvida por prioridade (pedido/atendimento -> vendedor -> fallback de ambiente), permitindo operação multiempresa/multifilial.
 
 ## 2.5 `estoque`
 
@@ -239,7 +239,7 @@ Implementar um CRM de atendimento para autopeças com:
 
 Após cliente confirmar itens, o flow deve:
 
-1. Gerar cobrança PIX com chave `02445780012`.
+1. Gerar cobrança PIX com a chave resolvida para o contexto da operação (empresa/filial/vendedor).
 2. Gerar `pix_copia_cola` e opcional QR.
 3. Enviar no chat o PIX + resumo do pedido.
 4. Gerar recibo provisório (PDF/HTML).
@@ -402,25 +402,25 @@ Após cliente confirmar itens, o flow deve:
 - Inserir, consultar e atualizar registros de todas as tabelas.
 - Toda mudança de status gera linha em `status_log`.
 
-## 12.2 Item: Cadastro de vendedores (com chave PIX da empresa)
+## 12.2 Item: Cadastro de vendedores (com chave PIX por contexto)
 
 ### Ações
 
 1. Criar formulário no dashboard para cadastrar vendedor.
 2. Campos obrigatórios: nome, telefone, ativo.
-3. Preencher automaticamente:
-   - `pix_chave_tipo = cpf`
-   - `pix_chave_valor = 02445780012`
+3. Capturar chave PIX conforme contexto operacional:
+   - `pix_chave_tipo` (cpf/cnpj/email/telefone/aleatória)
+   - `pix_chave_valor` (chave de recebimento da empresa/filial/vendedor)
 
 ### Regra
 
 - Não permitir salvar vendedor sem status `ativo` definido.
-- Não permitir troca da chave PIX oficial via painel de vendedor.
+- Garantir governança de alteração de chave PIX via permissões e auditoria.
 
 ### Critérios de aceite
 
 - Vendedor cadastrado aparece na fila de distribuição.
-- Chave PIX da empresa aplicada em todas as cobranças.
+- Chave PIX correta aplicada por contexto em todas as cobranças.
 
 ## 12.3 Item: Cadastro e visão de estoque
 

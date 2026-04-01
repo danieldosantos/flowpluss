@@ -173,8 +173,14 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && url.pathname === '/pix/cobranca') {
     readJsonBody(req, res, (parsedBody) => {
       const valor = Number(parsedBody?.valor || 0);
+      const chave = String(parsedBody?.chave || '').trim();
+      const chaveNumerica = chave.replace(/\D/g, '');
       if (!(valor > 0)) {
         respondJson(res, 400, { ok: false, error: 'valor_invalido' });
+        return;
+      }
+      if (!chave) {
+        respondJson(res, 400, { ok: false, error: 'chave_pix_obrigatoria' });
         return;
       }
       const txid = 'tx' + crypto.randomBytes(8).toString('hex');
@@ -183,7 +189,8 @@ const server = http.createServer((req, res) => {
         ok: true,
         txid,
         valor: valorFormatado,
-        pix_copia_cola: `00020126360014BR.GOV.BCB.PIX011402445780012520400005303986540${valorFormatado.replace('.', '')}5802BR5913FLOWPLUSS CRM6009SAO PAULO62070503***6304ABCD`,
+        chave,
+        pix_copia_cola: `00020126360014BR.GOV.BCB.PIX01${String(chaveNumerica || chave).length.toString().padStart(2, '0')}${chaveNumerica || chave}520400005303986540${valorFormatado.replace('.', '')}5802BR5913FLOWPLUSS CRM6009SAO PAULO62070503***6304ABCD`,
         status: 'aguardando_pagamento'
       });
     });
