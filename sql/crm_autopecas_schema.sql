@@ -160,13 +160,23 @@ CREATE TABLE IF NOT EXISTS leads (
 
 CREATE TABLE IF NOT EXISTS vendedores (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  codigo_funcionario text NOT NULL UNIQUE,
   nome text NOT NULL,
+  cargo text NOT NULL,
+  email text NOT NULL UNIQUE,
   telefone text NOT NULL UNIQUE,
+  avatar_url text,
   ativo boolean NOT NULL,
   pix_chave_tipo text NOT NULL DEFAULT 'cpf',
   pix_chave_valor text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ck_vendedores_codigo_funcionario_preenchido
+    CHECK (length(trim(codigo_funcionario)) >= 3),
+  CONSTRAINT ck_vendedores_cargo_preenchido
+    CHECK (length(trim(cargo)) >= 2),
+  CONSTRAINT ck_vendedores_email_formato_basico
+    CHECK (position('@' in email) > 1),
   CONSTRAINT ck_vendedores_pix_tipo_valido
     CHECK (pix_chave_tipo IN ('cpf', 'cnpj', 'email', 'telefone', 'aleatoria')),
   CONSTRAINT ck_vendedores_pix_chave_preenchida

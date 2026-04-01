@@ -66,8 +66,12 @@ Implementar um CRM de atendimento para autopeças com:
 ## 2.4 `vendedores`
 
 - `id` (uuid)
+- `codigo_funcionario` (identificador único visível no dashboard)
 - `nome`
+- `cargo`
+- `email`
 - `telefone`
+- `avatar_url`
 - `ativo` (bool)
 - `pix_chave_tipo` (cpf/cnpj/email/telefone/aleatória)
 - `pix_chave_valor` (chave por empresa/filial/vendedor)
@@ -273,6 +277,43 @@ Após cliente confirmar itens, o flow deve:
 
 ---
 
+## 6.4 Layout das páginas (intuitivo e moderno)
+
+### Página 1 — Inbox Omnichannel
+
+- Lista de conversas por **canal** (WhatsApp, telefone, email, Instagram, Facebook, Telegram, site chat, SMS).
+- Filtros rápidos por `status`, prioridade, vendedor e SLA.
+- Identificação visual do responsável por atendimento: avatar, nome, cargo e `código do funcionário`.
+- Botões principais (fixos e sempre visíveis): **Assumir conversa**, **Transferir**, **Finalizar atendimento**, **Abrir pedido**.
+
+### Página 2 — Lead/Cliente (ficha única)
+
+- Formulário completo com: nome, empresa, telefone, cidade/estado, tipo de cliente, consentimento LGPD e canais preferenciais.
+- Bloco “Histórico de interações” com carimbo de canal + atendente responsável.
+- Botões de ação contextual: **Salvar**, **Salvar e qualificar**, **Marcar como perdido** (com motivo obrigatório).
+
+### Página 3 — Pedido e Cobrança
+
+- Formulário de itens com busca por SKU/descrição, quantidade, preço, desconto e frete.
+- Painel lateral com resumo financeiro em tempo real (subtotal, descontos, total).
+- Botões obrigatórios do fluxo: **Enviar proposta**, **Confirmar itens**, **Gerar PIX**, **Reenviar PIX**, **Fechar venda**.
+- Exibir status atual em chip colorido para reduzir erros operacionais.
+
+### Página 4 — Equipe e Escala
+
+- Cadastro de funcionário com: código, nome, cargo, email, telefone, canal habilitado e status ativo/inativo.
+- Painel de disponibilidade por fila/canal para facilitar distribuição (round-robin + menor fila).
+- Botões: **Adicionar funcionário**, **Editar perfil**, **Ativar/Desativar**, **Reatribuir atendimentos**.
+
+### Critérios de UX recomendados
+
+- Navegação em no máximo 3 cliques para ações críticas (atender, propor, cobrar, fechar).
+- Padrão visual consistente (mesmos botões, mesma posição, mesmas cores por status).
+- Layout responsivo para desktop e tablet (largura mínima operacional: 1280px).
+- Contraste AA e fontes legíveis para operação contínua em balcão/call center.
+
+---
+
 ## 7) Dashboards (nodes de dashboard)
 
 ## 7.1 Aba: Operação
@@ -392,7 +433,7 @@ Após cliente confirmar itens, o flow deve:
 - `leads(id, telefone unique, status, created_at, updated_at)`
 - `atendimentos(id, lead_id, vendedor_id, status, created_at)`
 - `pedidos(id, atendimento_id, status, total, pix_txid, pago_em)`
-- `vendedores(id, nome, ativo, pix_chave_tipo, pix_chave_valor)`
+- `vendedores(id, codigo_funcionario, nome, cargo, email, telefone, ativo, pix_chave_tipo, pix_chave_valor)`
 - `estoque(id, sku unique, quantidade_disponivel, preco_unitario)`
 - `recibos(id, pedido_id, tipo, arquivo_url, gerado_em)`
 - `status_log(id, entidade, entidade_id, de_status, para_status, usuario, data_evento)`
@@ -402,12 +443,12 @@ Após cliente confirmar itens, o flow deve:
 - Inserir, consultar e atualizar registros de todas as tabelas.
 - Toda mudança de status gera linha em `status_log`.
 
-## 12.2 Item: Cadastro de vendedores (com chave PIX por contexto)
+## 12.2 Item: Cadastro de vendedores/funcionários (com chave PIX por contexto)
 
 ### Ações
 
 1. Criar formulário no dashboard para cadastrar vendedor.
-2. Campos obrigatórios: nome, telefone, ativo.
+2. Campos obrigatórios: código do funcionário, nome, cargo, email, telefone e ativo.
 3. Capturar chave PIX conforme contexto operacional:
    - `pix_chave_tipo` (cpf/cnpj/email/telefone/aleatória)
    - `pix_chave_valor` (chave de recebimento da empresa/filial/vendedor)
@@ -419,7 +460,7 @@ Após cliente confirmar itens, o flow deve:
 
 ### Critérios de aceite
 
-- Vendedor cadastrado aparece na fila de distribuição.
+- Funcionário cadastrado aparece na fila de distribuição com identificação clara (código + nome + cargo).
 - Chave PIX correta aplicada por contexto em todas as cobranças.
 
 ## 12.3 Item: Cadastro e visão de estoque
