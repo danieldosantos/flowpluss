@@ -1,3 +1,4 @@
 .env
 node-red/data
 *.log
+.artifacts/

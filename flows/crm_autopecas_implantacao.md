@@ -28,6 +28,36 @@ Este projeto agora inclui os artefatos necessários para implantar o blueprint c
 
 > Exemplo abaixo considerando sua stack já em execução (containers `node-red` e `evolution-postgres` saudáveis).
 
+### Opção A (recomendada): deploy automatizado e versionável
+
+1. Execute o deploy ponta a ponta (schema + flow via API Admin do Node-RED):
+
+   ```bash
+   ./scripts/deploy_crm_autopecas.sh
+   ```
+
+   O script:
+   - aplica `sql/crm_autopecas_schema.sql` no PostgreSQL;
+   - atualiza parâmetros de infraestrutura no flow (`crm_postgres_config` e URL de PIX);
+   - faz deploy full no Node-RED sem passo de import manual;
+   - gera trilha de auditoria em `.artifacts/last_crm_deploy.json`.
+
+2. Para versionar alterações feitas no editor Node-RED:
+
+   ```bash
+   ./scripts/export_crm_autopecas_flow.sh
+   git add flows/crm_autopecas_full_flow.json
+   git commit -m "chore(flow): versiona atualização CRM Autopeças"
+   ```
+
+3. Variáveis de ambiente opcionais para múltiplos ambientes:
+   - `NODE_RED_URL`
+   - `POSTGRES_CONTAINER`, `POSTGRES_DB_NAME`, `POSTGRES_DB_USER`
+   - `CRM_POSTGRES_HOST`, `CRM_POSTGRES_PORT`, `CRM_POSTGRES_DB`
+   - `CRM_PIX_GATEWAY_URL`
+
+### Opção B: processo manual (legado / MVP)
+
 1. Aplicar schema:
 
    ```bash

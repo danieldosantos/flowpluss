@@ -62,6 +62,33 @@ Fluxo recomendado:
 3. Ajustar credenciais de nós Postgres e gateway PIX.
 4. Executar testes E2E de webhook, proposta, PIX, pagamento e fechamento.
 
+### 1.3) Pipeline de deploy/versionamento (sem import manual)
+
+Para reduzir operação manual em ambiente de escala, o projeto agora inclui dois scripts:
+
+- `scripts/deploy_crm_autopecas.sh`: aplica schema + faz deploy full do flow via API Admin do Node-RED.
+- `scripts/export_crm_autopecas_flow.sh`: exporta o flow ativo do Node-RED para `flows/crm_autopecas_full_flow.json` para versionamento no Git.
+
+Fluxo recomendado de operação contínua:
+
+```bash
+# 1) Deploy automatizado da versão do repositório
+./scripts/deploy_crm_autopecas.sh
+
+# 2) Após ajustes em produção/homologação, exporte para versionar
+./scripts/export_crm_autopecas_flow.sh
+git add flows/crm_autopecas_full_flow.json
+git commit -m "chore(flow): versiona atualização do CRM Autopeças"
+```
+
+Variáveis úteis para customizar o deploy automatizado:
+
+- `NODE_RED_URL` (default: `http://127.0.0.1:1880`)
+- `POSTGRES_CONTAINER` (default: `evolution-postgres`)
+- `POSTGRES_DB_NAME` / `POSTGRES_DB_USER`
+- `CRM_POSTGRES_HOST` / `CRM_POSTGRES_PORT` / `CRM_POSTGRES_DB`
+- `CRM_PIX_GATEWAY_URL`
+
 Teste obrigatório para liberar time comercial:
 
 ```bash
